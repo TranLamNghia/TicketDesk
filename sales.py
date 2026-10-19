@@ -3,19 +3,17 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger(__name__);
-
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Sale:
     product: str
     quantity: int
     price: float
-    discount: float
 
     @property
     def total(self) -> float:
-        return self.price * self.quantity - self.discount
+        return self.price * self.quantity
 
 def read_sales(path: Path) -> list[Sale]:
     sales: list[Sale] = []
@@ -25,8 +23,7 @@ def read_sales(path: Path) -> list[Sale]:
                 sale = Sale(
                     product = str(row["product"]),
                     quantity = int(row["quantity"]),
-                    price = float(row["price"]),
-                    discount = float(row["discount"]),
+                    price = float(row["price"])
                 )
                 sales.append(sale)
             except (KeyError, ValueError) as e:

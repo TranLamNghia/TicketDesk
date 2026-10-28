@@ -1,16 +1,16 @@
 from pathlib import Path
 import environ
 
-# Gốc dự án: /TTTN/ticketdesk/ (lùi 3 cấp từ config/settings/base.py)
+# Root: /TTTN/ticketdesk/ (parent 3 level)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env()
-# Nạp file .env từ thư mục gốc
+# Load .env from root
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
-# Tách nhóm ứng dụng rõ ràng
+# Clearly separate app groups
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -61,7 +61,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Custom User Model (Nhiệm vụ 2 tiếp theo)
+# Custom User Model
 AUTH_USER_MODEL = "users.User"
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -73,13 +73,13 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Đa ngôn ngữ và Múi giờ
+# Language and Time Zone
 LANGUAGE_CODE = "vi"
 TIME_ZONE = "Asia/Ho_Chi_Minh"
 USE_I18N = True
 USE_TZ = True
 
-# Static & Media files (upload ảnh đính kèm theo wireframe)
+# Static & Media files
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]

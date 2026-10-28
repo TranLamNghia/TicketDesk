@@ -1,4 +1,4 @@
-# Môi trường dev (Postgres Docker 5433, Redis 6379, DEBUG=True)
+# Dev environment (Postgres Docker 5433, Redis 6379, DEBUG=True)
 from .base import *  # noqa: F403
 
 DEBUG = True

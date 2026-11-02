@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Ticket List - TicketDesk{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Ticket List</h2>
+    <a href="{% url 'tickets:create' %}" class="btn">+ Create Ticket</a>
+</div>
+
+<div class="card">
+    {% if tickets %}
+    <table>
+        <thead>
+            <tr>
+                <th>Priority</th>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Created by</th>
+                <th>Time</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticket in tickets %}
+            <tr>
+                <td>
+                    <span class="badge badge-{{ ticket.priority|lower }}">
+                        {{ ticket.get_priority_display }}
+                    </span>
+                </td>
+                <td>
+                    <a href="{% url 'tickets:detail' ticket.id %}" style="font-weight: 600; color: #0f172a; text-decoration: none;">
+                        {{ ticket.title }}
+                    </a>
+                </td>
+                <td>{{ ticket.category.name }}</td>
+                <td>{{ ticket.created_by.username }}</td>
+                <td>{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
+                <td>
+                    <a href="{% url 'tickets:detail' ticket.id %}" style="color: #2563eb; text-decoration: none;">Detail &rarr;</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align: center; color: #64748b; padding: 2rem 0;">No ticket created.</p>
+    {% endif %}
+</div>
+{% endblock %}

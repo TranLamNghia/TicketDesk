@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TicketDesk - IT Helpdesk{% endblock %}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; color: #1e293b; }
+        header { background-color: #0f172a; color: #fff; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        header a { color: #fff; text-decoration: none; font-weight: bold; font-size: 1.25rem; }
+        nav a { color: #94a3b8; text-decoration: none; margin-left: 1.5rem; font-size: 0.95rem; }
+        nav a:hover { color: #f8fafc; }
+        main { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+        .btn { display: inline-block; background-color: #2563eb; color: #fff; padding: 0.5rem 1rem; border-radius: 6px; text-decoration: none; border: none; cursor: pointer; font-size: 0.95rem; }
+        .btn:hover { background-color: #1d4ed8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f1f5f9; color: #475569; font-weight: 600; }
+        .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+        .badge-urgent { background: #fee2e2; color: #b91c1c; }
+        .badge-high { background: #ffedd5; color: #c2410c; }
+        .badge-medium { background: #fef3c7; color: #b45309; }
+        .badge-low { background: #e0f2fe; color: #0369a1; }
+        form div { margin-bottom: 1rem; }
+        form label { display: block; font-weight: 500; margin-bottom: 0.25rem; }
+        form input, form select, form textarea { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="{% url 'tickets:list' %}">TicketDesk</a>
+        <nav>
+            {% if user.is_authenticated %}
+                <span>Hi, <strong>{{ user.username }}</strong> ({{ user.get_role_display }})</span>
+                <a href="{% url 'tickets:create' %}">+ Create Ticket</a>
+                <a href="/admin/">Admin</a>
+            {% else %}
+                <a href="/admin/login/">Login</a>
+            {% endif %}
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

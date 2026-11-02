@@ -34,9 +34,16 @@
             {% if user.is_authenticated %}
                 <span>Hi, <strong>{{ user.username }}</strong> ({{ user.get_role_display }})</span>
                 <a href="{% url 'tickets:create' %}">+ Create Ticket</a>
-                <a href="/admin/">Admin</a>
+                {% if user.is_staff %}
+                    <a href="/admin/">Admin</a>
+                {% endif %}
+                <!-- Form Logout an toàn của Django -->
+                <form method="post" action="{% url 'logout' %}" style="display: inline; margin-left: 1.5rem;">
+                    {% csrf_token %}
+                    <button type="submit" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.95rem;">Logout</button>
+                </form>
             {% else %}
-                <a href="/admin/login/">Login</a>
+                <a href="{% url 'login' %}">Login</a>
             {% endif %}
         </nav>
     </header>

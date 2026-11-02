@@ -93,3 +93,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATABASES = {
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite'}")
 }
+
+# Navigate Login / Logout
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "tickets:list"
+LOGOUT_REDIRECT_URL = "tickets:list"

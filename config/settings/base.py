@@ -74,7 +74,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Language and Time Zone
-LANGUAGE_CODE = "vi"
+LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Ho_Chi_Minh"
 USE_I18N = True
 USE_TZ = True
@@ -88,3 +88,13 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Database Config
+DATABASES = {
+    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite'}")
+}
+
+# Navigate Login / Logout
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "tickets:list"
+LOGOUT_REDIRECT_URL = "tickets:list"

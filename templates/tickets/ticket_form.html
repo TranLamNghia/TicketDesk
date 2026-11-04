@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Send From Ticket - TicketDesk{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 650px; margin: 0 auto;">
+    <h2>Send From Ticket</h2>
+    <form method="post" novalidate>
+        {% csrf_token %}
+        {{ form.as_div }}
+        <div style="margin-top: 1.5rem;">
+            <button type="submit" class="btn">Submit</button>
+            <a href="{% url 'tickets:list' %}" style="margin-left: 1rem; color: #64748b; text-decoration: none;">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

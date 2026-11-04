@@ -1,8 +1,9 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DetailView, ListView, TemplateView
+from django.db.models import Prefetch
 
-from .models import Ticket
+from .models import Ticket, TicketHistory
 from .selectors import (
     count_solved_ticket_per_IT_Support,
     count_ticket_by_status,
@@ -12,7 +13,14 @@ from .selectors import (
 
 class TicketQuerysetMixin:
     def get_queryset(self):
-        return Ticket.objects.all()
+        return Ticket.objects.select_related(
+            "category", "created_by", "assignee"
+        ).prefetch_related(
+            Prefetch(
+                "status_history",
+                queryset=TicketHistory.objects.order_by("-update_status_at"),
+            )
+        )
 
 
 class TicketListView(LoginRequiredMixin, TicketQuerysetMixin, ListView):
@@ -40,9 +48,7 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
 
 
 class TicketStatsView(LoginRequiredMixin, TemplateView):
-    template_name = "tickets/ticket_stats.html"
-
-    def get_context_data(self, **kwargs):
+    def get_context_data(seft, **kwargs):
         context = super().get_context_data(**kwargs)
         context["kpis"] = get_overview_kpis()
         context["status_stats"] = count_ticket_by_status()

@@ -72,7 +72,8 @@ class TicketHistory(models.Model):
         SOLVED = "SOLVED", "Solved"
         CLOSED = "CLOSED", "Closed"
         REOPEN = "REOPEN", "Reopen"
-        REJECT = "REJECT", "Reject"
+        REJECTED = "REJECTED", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey(

@@ -23,9 +23,9 @@ He thong quan ly su co va yeu cau ho tro ky thuat noi bo theo chuan Fullstack Dj
 
 ## Cau truc du an chinh
 - config/: Modular settings (base, dev, prod) voi django-environ.
-- apps/users/: Custom User Model voi UUIDv4 va RBAC (Requester, IT Support, IT Manager).
-- apps/tickets/: Mien nghiep vu Ticket, Category, History, Comment, Attachment.
-- apps/notifications/: Xu ly gui thong bao va email nen.
+- apps/users/: Custom User Model voi UUIDv4 va RBAC (Requester, IT Support, IT Manager).
+- apps/tickets/: Mien nghiep vu Ticket, Category, History, Comment, Attachment.
+- apps/notifications/: Xu ly gui thong bao va email nen.
 - docker/: Docker Compose chay PostgreSQL va Redis.
 
 ---

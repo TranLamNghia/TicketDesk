@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ticket.title }} Ticket Detail - TicketDesk{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <span class="badge badge-{{ ticket.priority|lower }}">{{ ticket.get_priority_display }}</span>
+            <span style="color: #64748b; font-size: 0.9rem; margin-left: 0.5rem;">Category: <strong>{{ ticket.category.name }}</strong></span>
+            <h1 style="margin: 0.5rem 0 1rem 0;">{{ ticket.title }}</h1>
+        </div>
+        <a href="{% url 'tickets:list' %}" class="btn" style="background: #e2e8f0; color: #334155;">&larr; Back </a>
+    </div>
+
+    <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; line-height: 1.6;">
+        <h4 style="margin-top: 0; color: #475569;">Content:</h4>
+        <p style="white-space: pre-line; margin-bottom: 0;">{{ ticket.description }}</p>
+    </div>
+
+    <div style="display: flex; gap: 2rem; font-size: 0.9rem; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
+        <div>Created by: <strong>{{ ticket.created_by.username }}</strong></div>
+        <div>Assignee: <strong>{{ ticket.assignee.username|default:"Unassigned" }}</strong></div>
+        <div>Time: <strong>{{ ticket.created_at|date:"d/m/Y H:i:s" }}</strong></div>
+    </div>
+</div>
+{% endblock %}

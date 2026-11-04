@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - TicketDesk{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Analytics</h2>
+    <a href="{% url 'tickets:list' %}" class="btn" style="background: #e2e8f0; color: #334155;">&larr; Back</a>
+</div>
+
+<!-- Overview KPIs -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+    <div class="card" style="margin-bottom: 0; border-top: 4px solid #2563eb;">
+        <div style="color: #64748b; font-size: 0.9rem;">Total tickets</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #0f172a;">{{ kpis.total_tickets|default:0 }}</div>
+    </div>
+    <div class="card" style="margin-bottom: 0; border-top: 4px solid #b91c1c;">
+        <div style="color: #64748b; font-size: 0.9rem;">Urgent tickets</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #b91c1c;">{{ kpis.urgent_tickets|default:0 }}</div>
+    </div>
+    <div class="card" style="margin-bottom: 0; border-top: 4px solid #c2410c;">
+        <div style="color: #64748b; font-size: 0.9rem;">Unassigned tickets</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #c2410c;">{{ kpis.unassigned_tickets|default:0 }}</div>
+    </div>
+    <div class="card" style="margin-bottom: 0; border-top: 4px solid #15803d;">
+        <div style="color: #64748b; font-size: 0.9rem;">Solved tickets</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #15803d;">{{ kpis.solved_tickets|default:0 }}</div>
+    </div>
+</div>
+
+<!-- Tickets by status -->
+<div class="card">
+    <h3 style="margin-top: 0;">Tickets by status</h3>
+    {% if status_stats %}
+    <table>
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Total</th>
+                <th style="width: 50%;">Ratio</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in status_stats %}
+            <tr>
+                <td>
+                    <span class="badge" style="background: #e2e8f0; color: #334155;">
+                        {{ row.current_status|default:"NO HISTORY" }}
+                    </span>
+                </td>
+                <td>{{ row.total }}</td>
+                <td>
+                    <div style="background: #f1f5f9; border-radius: 4px; height: 10px; overflow: hidden;">
+                        <div style="background: #2563eb; height: 100%; width: {% widthratio row.total kpis.total_tickets 100 %}%;"></div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align: center; color: #64748b; padding: 2rem 0;">No ticket data.</p>
+    {% endif %}
+</div>
+
+<!-- Solved tickets per IT Support -->
+<div class="card">
+    <h3 style="margin-top: 0;">Solved tickets per IT Support</h3>
+    {% if support_stats %}
+    <table>
+        <thead>
+            <tr>
+                <th>IT Support</th>
+                <th>Solved</th>
+                <th style="width: 50%;">Ratio</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in support_stats %}
+            <tr>
+                <td style="font-weight: 600;">{{ row.assignee__username|default:"Unassigned" }}</td>
+                <td>{{ row.total_solved }}</td>
+                <td>
+                    <div style="background: #f1f5f9; border-radius: 4px; height: 10px; overflow: hidden;">
+                        <div style="background: #15803d; height: 100%; width: {% widthratio row.total_solved kpis.solved_tickets 100 %}%;"></div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align: center; color: #64748b; padding: 2rem 0;">No solved ticket yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

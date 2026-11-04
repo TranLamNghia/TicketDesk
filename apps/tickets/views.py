@@ -1,17 +1,18 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
-from django.views.generic import CreateView, DetailView, ListView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView
 
-from apps.users.models import User
 from .models import Ticket
+from .selectors import (
+    count_solved_ticket_per_IT_Support,
+    count_ticket_by_status,
+    get_overview_kpis,
+)
 
 
 class TicketQuerysetMixin:
     def get_queryset(self):
-        qs = Ticket.objects.select_related("category", "assignee", "created_by")
-        if self.request.user.role == User.Role.REQUESTER:
-            qs = qs.filter(created_by=self.request.user)
-        return qs
+        return Ticket.objects.all()
 
 
 class TicketListView(LoginRequiredMixin, TicketQuerysetMixin, ListView):
@@ -36,3 +37,15 @@ class TicketCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.created_by = self.request.user
         return super().form_valid(form)
+
+
+class TicketStatsView(LoginRequiredMixin, TemplateView):
+    template_name = "tickets/ticket_stats.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["kpis"] = get_overview_kpis()
+        context["status_stats"] = count_ticket_by_status()
+        context["support_stats"] = count_solved_ticket_per_IT_Support()
+
+        return context

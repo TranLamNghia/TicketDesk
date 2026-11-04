@@ -15,8 +15,10 @@
             <tr>
                 <th>Priority</th>
                 <th>Title</th>
+                <th>Status</th>
                 <th>Category</th>
                 <th>Created by</th>
+                <th>Assignee</th>
                 <th>Time</th>
                 <th>Action</th>
             </tr>
@@ -34,8 +36,20 @@
                         {{ ticket.title }}
                     </a>
                 </td>
+                <td>
+                    <span class="badge" style="background: #e2e8f0; color: #334155;">
+                        {{ ticket.status_history.first.get_status_display|default:"New" }}
+                    </span>
+                </td>
                 <td>{{ ticket.category.name }}</td>
                 <td>{{ ticket.created_by.username }}</td>
+                <td>
+                    {% if ticket.assignee %}
+                        <span style="font-weight: 500; color: #0f172a;">{{ ticket.assignee.username }}</span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-style: italic;">Unassigned</span>
+                    {% endif %}
+                </td>
                 <td>{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
                 <td>
                     <a href="{% url 'tickets:detail' ticket.id %}" style="color: #2563eb; text-decoration: none;">Detail &rarr;</a>
@@ -44,6 +58,23 @@
             {% endfor %}
         </tbody>
     </table>
+
+    {% if is_paginated %}
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+        <span style="color: #64748b; font-size: 0.9rem;">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} (Total: {{ page_obj.paginator.count }} tickets)
+        </span>
+        <div>
+            {% if page_obj.has_previous %}
+                <a href="?page={{ page_obj.previous_page_number }}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; background-color: #64748b;">&larr; Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; margin-left: 0.5rem;">Next &rarr;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% else %}
     <p style="text-align: center; color: #64748b; padding: 2rem 0;">No ticket created.</p>
     {% endif %}

@@ -8,6 +8,21 @@
     <a href="{% url 'tickets:create' %}" class="btn">+ Create Ticket</a>
 </div>
 
+<!-- PostgreSQL Full-Text Search Form -->
+<form method="get" action="{% url 'tickets:list' %}" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+    <input 
+        type="text" 
+        name="q" 
+        value="{{ request.GET.q|default:'' }}" 
+        placeholder="Search tickets by keywords (e.g. VPN, printer, password, Docker, monitor)..." 
+        style="flex: 1; padding: 0.6rem 1rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem;"
+    >
+    <button type="submit" class="btn">Search</button>
+    {% if request.GET.q %}
+        <a href="{% url 'tickets:list' %}" class="btn" style="background-color: #64748b;">Clear</a>
+    {% endif %}
+</form>
+
 <div class="card">
     {% if tickets %}
     <table>
@@ -66,17 +81,23 @@
         </span>
         <div>
             {% if page_obj.has_previous %}
-                <a href="?page={{ page_obj.previous_page_number }}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; background-color: #64748b;">&larr; Previous</a>
+                <a href="?page={{ page_obj.previous_page_number }}{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; background-color: #64748b;">&larr; Previous</a>
             {% endif %}
             {% if page_obj.has_next %}
-                <a href="?page={{ page_obj.next_page_number }}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; margin-left: 0.5rem;">Next &rarr;</a>
+                <a href="?page={{ page_obj.next_page_number }}{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; margin-left: 0.5rem;">Next &rarr;</a>
             {% endif %}
         </div>
     </div>
     {% endif %}
 
     {% else %}
-    <p style="text-align: center; color: #64748b; padding: 2rem 0;">No ticket created.</p>
+    <p style="text-align: center; color: #64748b; padding: 2rem 0;">
+        {% if request.GET.q %}
+            No tickets found matching keyword "<strong>{{ request.GET.q }}</strong>".
+        {% else %}
+            No ticket created.
+        {% endif %}
+    </p>
     {% endif %}
 </div>
 {% endblock %}

@@ -1,9 +1,13 @@
-from rest_framework import serializers
+from rest_framework.serializers import (
+    ModelSerializer,
+    SerializerMethodField,
+    ValidationError,
+)
 from apps.tickets.models import Category, Comment, Ticket, TicketHistory
 from apps.users.models import User
 
 
-class CategorySerializer(serializers.ModelSerializer):
+class CategorySerializer(ModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name"]
@@ -13,20 +17,18 @@ class CategorySerializer(serializers.ModelSerializer):
         clean_name = value.strip()
 
         if len(clean_name) < 2:
-            raise serializers.ValidationError(
-                "Category Name must be at lease 2 characters long."
-            )
+            raise ValidationError("Category Name must be at lease 2 characters long.")
 
         return clean_name
 
 
-class CommentAuthorSerializer(serializers.ModelSerializer):
+class CommentAuthorSerializer(ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "username", "role"]
 
 
-class CommentSerializer(serializers.ModelSerializer):
+class CommentSerializer(ModelSerializer):
     author = CommentAuthorSerializer(read_only=True)
 
     class Meta:
@@ -38,23 +40,23 @@ class CommentSerializer(serializers.ModelSerializer):
         clean_content = value.strip()
 
         if not clean_content:
-            raise serializers.ValidationError("Comment content cannot be empty.")
+            raise ValidationError("Comment content cannot be empty.")
 
         return clean_content
 
 
-class TicketUserSummarySerializer(serializers.ModelSerializer):
+class TicketUserSummarySerializer(ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "username", "role"]
 
 
-class TicketListSerializer(serializers.ModelSerializer):
+class TicketListSerializer(ModelSerializer):
     category = CategorySerializer(read_only=True)
     created_by = TicketUserSummarySerializer(read_only=True)
     assignee = TicketUserSummarySerializer(read_only=True)
 
-    status = serializers.SerializerMethodField()
+    status = SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -79,7 +81,7 @@ class TicketListSerializer(serializers.ModelSerializer):
         return TicketHistory.Status.NEW
 
 
-class TicketHistorySerializer(serializers.ModelSerializer):
+class TicketHistorySerializer(ModelSerializer):
     class Meta:
         model = TicketHistory
         fields = ["id", "status", "update_status_at"]
@@ -100,7 +102,7 @@ class TicketDetailSerializer(TicketListSerializer):
         read_only_fields = fields
 
 
-class TicketCreateSerializer(serializers.ModelSerializer):
+class TicketCreateSerializer(ModelSerializer):
     class Meta:
         model = Ticket
         fields = ["id", "title", "description", "priority", "category"]
@@ -110,9 +112,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         clean_title = value.strip()
 
         if len(clean_title) < 5:
-            raise serializers.ValidationError(
-                "Title must be at leat 5 characters long."
-            )
+            raise ValidationError("Title must be at leat 5 characters long.")
 
         return clean_title
 
@@ -120,6 +120,6 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         clean_description = value.strip()
 
         if not clean_description:
-            raise serializers.ValidationError("Description cannot be empty.")
+            raise ValidationError("Description cannot be empty.")
 
         return clean_description

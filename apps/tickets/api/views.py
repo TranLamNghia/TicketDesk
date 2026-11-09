@@ -1,5 +1,6 @@
 from rest_framework import viewsets, permissions
 from django.db import transaction
+from apps.users.models import User
 
 from apps.tickets.models import Category, Ticket, TicketHistory
 from apps.tickets.api.serializers import (
@@ -8,19 +9,27 @@ from apps.tickets.api.serializers import (
     TicketDetailSerializer,
     TicketCreateSerializer,
 )
+from apps.tickets.api.permissions import (
+    IsManagerOrReadOnly,
+    IsTicketAccessAllowed,
+)
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsManagerOrReadOnly]
 
 
 class TicketViewSet(viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsTicketAccessAllowed]
 
     def get_queryset(self):
+        user = self.request.user
         qs = Ticket.objects.select_related("category", "created_by", "assignee")
+
+        if user.is_authenticated and user.role == User.Role.REQUESTER:
+            qs = qs.filter(created_by=user)
 
         if self.action == "retrieve":
             return qs.prefetch_related(

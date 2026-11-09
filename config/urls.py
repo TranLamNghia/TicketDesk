@@ -6,6 +6,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("django.contrib.auth.urls")),
     path("tickets/", include("apps.tickets.urls", namespace="tickets")),
+    path("api/v1/", include("apps.tickets.api.urls")),
 ]
 
 if settings.DEBUG:

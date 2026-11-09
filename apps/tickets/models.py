@@ -1,6 +1,7 @@
 import uuid
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class Category(models.Model):
@@ -59,7 +60,21 @@ class Ticket(models.Model):
         db_table = "tickets"
         verbose_name = "Ticket"
         verbose_name_plural = "Tickets"
-        ordering = ["-created_at"]
+        ordering = ["created_at"]
+
+        indexes = [
+            models.Index(fields=["created_at"], name="ticket_created_at_idx"),
+            models.Index(
+                fields=["priority", "created_at"], name="ticket_priority_created_idx"
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(title=""),
+                name="ticket_title_not_empty",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"[{self.get_priority_display()}] {self.title}"
@@ -72,7 +87,8 @@ class TicketHistory(models.Model):
         SOLVED = "SOLVED", "Solved"
         CLOSED = "CLOSED", "Closed"
         REOPEN = "REOPEN", "Reopen"
-        REJECT = "REJECT", "Reject"
+        REJECTED = "REJECTED", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey(

@@ -1,0 +1,30 @@
+name: ticketdesk_container
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ticketdesk_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: ticketdesk
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ticketdesk_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+    name: ticketdesk_postgres_data
+  redis_data:
+    name: ticketdesk_redis_data

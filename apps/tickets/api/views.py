@@ -1,4 +1,5 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, filters
+from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
 from apps.users.models import User
 
@@ -13,16 +14,30 @@ from apps.tickets.api.permissions import (
     IsManagerOrReadOnly,
     IsTicketAccessAllowed,
 )
+from apps.tickets.api.filters import TicketFilter
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
     permission_classes = [IsManagerOrReadOnly]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name"]
+    ordering_fields = ["name"]
 
 
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsTicketAccessAllowed]
+
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_class = TicketFilter
+    search_fields = ["title", "description"]
+    ordering_fields = ["created_at", "priority"]
+    ordering = ["-created_at"]
 
     def get_queryset(self):
         user = self.request.user

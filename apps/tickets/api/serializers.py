@@ -1,9 +1,16 @@
+from rest_framework import serializers
 from rest_framework.serializers import (
     ModelSerializer,
     SerializerMethodField,
     ValidationError,
 )
-from apps.tickets.models import Category, Comment, Ticket, TicketHistory
+from apps.tickets.models import (
+    Category,
+    Comment,
+    Ticket,
+    TicketHistory,
+    AttachmentTicket,
+)
 from apps.users.models import User
 
 
@@ -20,6 +27,13 @@ class CategorySerializer(ModelSerializer):
             raise ValidationError("Category Name must be at lease 2 characters long.")
 
         return clean_name
+
+
+class AttachmentTicketSerializer(ModelSerializer):
+    class Meta:
+        model = AttachmentTicket
+        fields = ["id", "url", "size"]
+        read_only_fields = fields
 
 
 class CommentAuthorSerializer(ModelSerializer):
@@ -57,6 +71,7 @@ class TicketListSerializer(ModelSerializer):
     assignee = TicketUserSummarySerializer(read_only=True)
 
     status = SerializerMethodField()
+    has_attachment = SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -80,6 +95,9 @@ class TicketListSerializer(ModelSerializer):
 
         return TicketHistory.Status.NEW
 
+    def get_has_attachment(self, obj):
+        return obj.attachments.exists()
+
 
 class TicketHistorySerializer(ModelSerializer):
     class Meta:
@@ -91,6 +109,7 @@ class TicketHistorySerializer(ModelSerializer):
 class TicketDetailSerializer(TicketListSerializer):
     comments = CommentSerializer(many=True, read_only=True)
     status_history = TicketHistorySerializer(many=True, read_only=True)
+    attachments = AttachmentTicketSerializer(many=True, read_only=True)
 
     class Meta(TicketListSerializer.Meta):
         fields = TicketListSerializer.Meta.fields + [
@@ -98,14 +117,17 @@ class TicketDetailSerializer(TicketListSerializer):
             "note",
             "comments",
             "status_history",
+            "attachments",
         ]
         read_only_fields = fields
 
 
 class TicketCreateSerializer(ModelSerializer):
+    attachment = serializers.FileField(required=False, write_only=True)
+
     class Meta:
         model = Ticket
-        fields = ["id", "title", "description", "priority", "category"]
+        fields = ["id", "title", "description", "priority", "category", "attachment"]
         read_only_fields = ["id"]
 
     def validate_title(self, value):
@@ -123,3 +145,22 @@ class TicketCreateSerializer(ModelSerializer):
             raise ValidationError("Description cannot be empty.")
 
         return clean_description
+
+    def validate_attachment(self, file_obj):
+        if not file_obj:
+            return None
+
+        max_size = 10 * 1024 * 1024
+
+        if file_obj.size > max_size:
+            raise serializers.ValidationError("File size must not exceed 10MB.")
+
+        forbidden_extensions = [".exe", ".bat", ".sh", ".php", ".py", ".js", ".cmd"]
+        file_name = file_obj.name.lower()
+
+        if any(file_name.endswith(ext) for ext in forbidden_extensions):
+            raise serializers.ValidationError(
+                "This file extension is forbidden for security reasons."
+            )
+
+        return file_obj

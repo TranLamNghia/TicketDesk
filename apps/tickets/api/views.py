@@ -3,11 +3,18 @@ from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
 from django.core.exceptions import ValidationError
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from apps.tickets.services import claim_ticket, reassign_ticket, assign_ticket
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
 from apps.users.models import User
-from apps.tickets.models import Category, Ticket, TicketHistory, Comment
+from apps.tickets.models import (
+    Category,
+    Ticket,
+    TicketHistory,
+    Comment,
+    AttachmentTicket,
+)
 from apps.tickets.api.serializers import (
     CategorySerializer,
     TicketListSerializer,
@@ -35,6 +42,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsTicketAccessAllowed]
 
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
@@ -56,6 +64,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return qs.prefetch_related(
                 "status_history",
                 "comments__author",
+                "attachments",
             )
 
         return qs.prefetch_related("status_history")
@@ -69,9 +78,16 @@ class TicketViewSet(viewsets.ModelViewSet):
         return TicketListSerializer
 
     def perform_create(self, serializer):
+        attachment_file = serializer.validated_data.pop("attachment", None)
+
         with transaction.atomic():
             ticket = serializer.save(created_by=self.request.user)
             TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.NEW)
+
+            if attachment_file:
+                AttachmentTicket.objects.create(
+                    ticket=ticket, url=attachment_file, size=attachment_file.size
+                )
 
     @action(detail=True, methods=["post"])
     def claim(self, request, pk=None):

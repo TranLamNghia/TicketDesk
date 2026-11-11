@@ -5,7 +5,7 @@ from django.urls import reverse_lazy
 from django.views.generic import CreateView, DetailView, ListView, TemplateView
 
 from apps.users.models import User
-from .models import Ticket, TicketHistory
+from apps.tickets.models import Ticket, TicketHistory
 from .selectors import (
     count_solved_ticket_per_IT_Support,
     count_ticket_by_status,
@@ -51,7 +51,7 @@ class TicketDetailView(LoginRequiredMixin, TicketQuerysetMixin, DetailView):
 
 class TicketCreateView(LoginRequiredMixin, CreateView):
     model = Ticket
-    fields = ["title", "description", "category", "priority"]
+    fields = ("title", "description", "category", "priority")
     template_name = "tickets/ticket_form.html"
     success_url = reverse_lazy("tickets:list")
 

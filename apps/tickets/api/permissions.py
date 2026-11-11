@@ -7,7 +7,7 @@ class IsManager(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (request.user.role == User.Role.MANAGER or request.user.is_superuser)
+            and (request.user.role == User.Role.IT_MANAGER or request.user.is_superuser)
         )
 
 
@@ -19,7 +19,7 @@ class IsManagerOrReadOnly(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (request.user.role == User.Role.MANAGER or request.user.is_superuser)
+            and (request.user.role == User.Role.IT_MANAGER or request.user.is_superuser)
         )
 
 
@@ -29,10 +29,10 @@ class IsTicketAccessAllowed(BasePermission):
         if not user or not user.is_authenticated:
             return False
 
-        if user.is_superuser or user.role == User.Role.MANAGER:
+        if user.is_superuser or user.role == User.Role.IT_MANAGER:
             return True
 
-        if user.role == User.Role.SUPPORT:
+        if user.role == User.Role.IT_SUPPORT:
             if request.method in SAFE_METHODS:
                 return True
 

@@ -95,9 +95,9 @@ class TicketDetailSerializer(TicketListSerializer):
     class Meta(TicketListSerializer.Meta):
         fields = TicketListSerializer.Meta.fields + [
             "description",
+            "note",
             "comments",
             "status_history",
-            "updated_at",
         ]
         read_only_fields = fields
 

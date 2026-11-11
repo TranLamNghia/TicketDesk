@@ -7,6 +7,10 @@ class TicketFilter(django_filters.FilterSet):
         choices=TicketHistory.Status.choices, method="filter_by_status"
     )
 
+    created_by_username = django_filters.CharFilter(
+        field_name="created_by__username", lookup_expr="iexact"
+    )
+
     class Meta:
         model = Ticket
         fields = {

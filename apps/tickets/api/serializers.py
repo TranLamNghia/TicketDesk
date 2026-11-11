@@ -84,6 +84,7 @@ class TicketListSerializer(ModelSerializer):
             "created_by",
             "assignee",
             "created_at",
+            "has_attachment",
         ]
         read_only_fields = fields
 

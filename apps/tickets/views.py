@@ -4,7 +4,8 @@ from django.db.models import Prefetch
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DetailView, ListView, TemplateView
 
-from apps.users.models import User, Ticket, TicketHistory
+from apps.users.models import User
+from apps.tickets.models import Ticket, TicketHistory
 from .selectors import (
     count_solved_ticket_per_IT_Support,
     count_ticket_by_status,

@@ -8,6 +8,7 @@ from apps.tickets.tests.factories import (
     TicketFactory,
     TicketHistoryFactory,
     UserFactory,
+    CommentFactory,
 )
 from apps.users.models import User
 
@@ -140,3 +141,62 @@ class TestTicketActionsPermissions:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["status"] == TicketHistory.Status.PROCESSING
         assert response.data["assignee"]["id"] == str(support.id)
+
+
+class TestCategoryAPI:
+    def test_authenticated_user_can_list_categories(self, api_client):
+        CategoryFactory.create_batch(3)
+        user = UserFactory(role=User.Role.REQUESTER)
+
+        api_client.force_authenticate(user=user)
+        response = api_client.get("/api/v1/categories/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 3
+
+    def test_requester_cannot_create_category(self, api_client):
+        user = UserFactory(role=User.Role.REQUESTER)
+        api_client.force_authenticate(user=user)
+
+        response = api_client.post("/api/v1/categories/", {"name": "Danh mục Test"})
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_manager_can_create_category(self, api_client):
+        manager = UserFactory(role=User.Role.IT_MANAGER)
+        api_client.force_authenticate(user=manager)
+
+        response = api_client.post("/api/v1/categories/", {"name": "Hạ tầng mạng"})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["name"] == "Hạ tầng mạng"
+
+
+class TestCommentAPI:
+    def test_create_comment_success(self, api_client):
+        user = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=user)
+        api_client.force_authenticate(user=user)
+        payload = {
+            "ticket": str(ticket.id),
+            "content": "Tôi gửi bổ sung thông tin máy in bị kẹt khay giấy số 2.",
+        }
+
+        response = api_client.post("/api/v1/comments/", payload)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["content"] == payload["content"]
+        assert response.data["author"]["id"] == str(user.id)
+
+    def test_list_comments_by_ticket(self, api_client):
+        user = UserFactory(role=User.Role.REQUESTER)
+        ticket_a = TicketFactory()
+        ticket_b = TicketFactory()
+        CommentFactory.create_batch(2, ticket=ticket_a)
+        CommentFactory.create_batch(3, ticket=ticket_b)
+
+        api_client.force_authenticate(user=user)
+        response = api_client.get(f"/api/v1/comments/?ticket={ticket_a.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 2

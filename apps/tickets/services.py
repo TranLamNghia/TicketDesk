@@ -93,8 +93,11 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
         raise ValidationError("Ticket has already been assigned. Use reassign instead.")
 
     latest_history = ticket.status_history.first()
-    if not latest_history or latest_history.status not in [TicketHistory.Status.NEW]:
-        raise ValidationError("Only tickets in NEW status can be assigned.")
+    if not latest_history or latest_history.status not in [
+        TicketHistory.Status.NEW,
+        TicketHistory.Status.REOPEN,
+    ]:
+        raise ValidationError("Only tickets in NEW or REOPEN status can be assigned.")
 
     ticket.assignee = support_user
     ticket.save(update_fields=["assignee"])

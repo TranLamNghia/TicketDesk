@@ -23,8 +23,16 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "factory-boy>=3.3.3",
+    "faker>=40.54.0",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
 ]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-q --reuse-db"

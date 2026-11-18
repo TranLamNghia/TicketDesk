@@ -32,6 +32,18 @@ class IsSupport(BasePermission):
         )
 
 
+class IsSupportOrManager(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (
+                request.user.role in (User.Role.IT_SUPPORT, User.Role.IT_MANAGER)
+                or request.user.is_superuser
+            )
+        )
+
+
 class IsRequester(BasePermission):
     def has_permission(self, request, view):
         return bool(

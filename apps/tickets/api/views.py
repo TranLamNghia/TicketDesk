@@ -2,7 +2,6 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
-from django.core.exceptions import ValidationError
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from apps.tickets.services import (
     claim_ticket,
@@ -12,9 +11,11 @@ from apps.tickets.services import (
     reject_ticket,
     close_ticket,
     reopen_ticket,
+    resume_ticket,
     cancel_ticket,
 )
 from django_filters.rest_framework import DjangoFilterBackend
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from apps.users.models import User
 from apps.tickets.models import (
@@ -36,9 +37,21 @@ from apps.tickets.api.permissions import (
     IsTicketAccessAllowed,
     IsManager,
     IsSupport,
+    IsSupportOrManager,
     IsRequester,
 )
+from apps.tickets.api.exceptions import SERVICE_EXCEPTIONS, to_api_exception
 from apps.tickets.api.filters import TicketFilter
+
+
+def _get_active_support(user_id):
+    """Only active IT Support accounts can receive a ticket."""
+    if not user_id:
+        return None
+    try:
+        return User.objects.get(id=user_id, role=User.Role.IT_SUPPORT, is_active=True)
+    except (User.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+        return None
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -109,8 +122,8 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket = self.get_object()
         try:
             ticket = claim_ticket(ticket.id, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -129,32 +142,33 @@ class TicketViewSet(viewsets.ModelViewSet):
                 {"support_id": ["This feild is required."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            support_user = User.objects.get(id=support_id, role=User.Role.IT_SUPPORT)
-        except User.DoesNotExist:
+
+        support_user = _get_active_support(support_id)
+        if support_user is None:
             return Response(
-                {"support_id": ["IT Support not found."]},
+                {"support_id": ["IT Support not found or inactive."]},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         try:
             ticket = assign_ticket(ticket.id, support_user, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
         serializer = self.get_serializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
         detail=True,
         methods=["post"],
-        permission_classes=[permissions.IsAuthenticated, IsManager],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
     )
     def reassign(self, request, pk=None):
         ticket = self.get_object()
-        received_by_id = request.data.get("received_by")
-        reason = request.data.get("reason", "").strip()
+        received_by_id = request.data.get("received_by") or request.data.get(
+            "assignee_id"
+        )
+        reason = (request.data.get("reason") or "").strip()
 
         if not received_by_id:
             return Response(
@@ -162,18 +176,23 @@ class TicketViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            received_by = User.objects.get(id=received_by_id, role=User.Role.IT_SUPPORT)
-        except User.DoesNotExist:
+        if not reason:
             return Response(
-                {"received_by": ["IT Support not found."]},
+                {"reason": ["Please enter a reason for transferring the ticket."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        received_by = _get_active_support(received_by_id)
+        if received_by is None:
+            return Response(
+                {"received_by": ["IT Support not found or inactive."]},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
             ticket = reassign_ticket(ticket.id, request.user, received_by, reason)
-        except (ValidationError, ValueError) as ex:
-            return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -189,11 +208,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         try:
             ticket = solve_ticket(ticket.id, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -203,21 +219,27 @@ class TicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         permission_classes=[permissions.IsAuthenticated, IsSupport],
     )
-    def reject(self, request, pk=None):
-        user = request.user
-        if (
-            user.role not in (User.Role.IT_SUPPORT, User.Role.IT_MANAGER)
-            and not user.is_superuser
-        ):
-            return Response(
-                {
-                    "detail": "Only IT Support or a Manager has the authority to reject a ticket."
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+    def resume(self, request, pk=None):
+        # US15 KB4: the assigned IT Support continues a REOPEN ticket
+        # (REOPEN -> PROCESSING) when they choose to.
         ticket = self.get_object()
-        reason = request.data.get("reason", "").strip()
+
+        try:
+            ticket = resume_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def reject(self, request, pk=None):
+        ticket = self.get_object()
+        reason = (request.data.get("reason") or "").strip()
         if not reason:
             return Response(
                 {"reason": ["A reason for refusal is required."]},
@@ -225,12 +247,9 @@ class TicketViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            ticket = reject_ticket(ticket.id, user, reason)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            ticket = reject_ticket(ticket.id, request.user, reason)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -245,11 +264,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         try:
             ticket = close_ticket(ticket.id, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -262,7 +278,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     )
     def reopen(self, request, pk=None):
         ticket = self.get_object()
-        reason = request.data.get("reason", "").strip()
+        reason = (request.data.get("reason") or "").strip()
 
         if not reason:
             return Response(
@@ -272,11 +288,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         try:
             ticket = reopen_ticket(ticket.id, request.user, reason)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -292,11 +305,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         try:
             ticket = cancel_ticket(ticket.id, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 

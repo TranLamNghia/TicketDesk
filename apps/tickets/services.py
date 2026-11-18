@@ -115,3 +115,118 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
     )
 
     return ticket
+
+
+@transaction.atomic
+def solve_ticket(ticket_id, support_user: User) -> Ticket:
+    """
+    IT Support marks the ticket as resolved (PROCESSING -> SOLVED).
+    """
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+    if ticket.assignee != support_user and not support_user.is_superuser:
+        raise ValidationError(
+            "Only the person assigned to handle a ticket has the authority to mark it as complete."
+        )
+
+    latest = ticket.status_history.first()
+
+    if not latest or latest.status != TicketHistory.Status.PROCESSING:
+        raise ValidationError(
+            "Only tickets in the PROCESSING state can be marked as SOLVED."
+        )
+
+    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+    return ticket
+
+
+@transaction.atomic
+def reject_ticket(ticket_id, support_user: User, reason: str) -> Ticket:
+    """
+    IT Support rejects an invalid ticket (NEW -> REJECTED).
+    """
+    if not reason.strip():
+        raise ValidationError("A reason for refusal is required.")
+
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+    latest = ticket.status_history.first()
+
+    if not latest or latest.status != TicketHistory.Status.NEW:
+        raise ValidationError("Only tickets in the NEW status can be rejected.")
+
+    ticket.note = f"[REJECTED by {support_user.username}]: {reason.strip()}"
+    ticket.save(update_fields=["note"])
+    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.REJECTED)
+
+    return ticket
+
+
+@transaction.atomic
+def close_ticket(ticket_id, requester_user: User) -> Ticket:
+    """
+    Requester confirms ticket closure (SOLVED -> CLOSED)
+    """
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+    if ticket.created_by != requester_user and not requester_user.is_superuser:
+        raise ValidationError(
+            "Only the person who created the ticket has the authority to confirm its closure."
+        )
+
+    latest = ticket.status_history.first()
+
+    if not latest or latest.status != TicketHistory.Status.SOLVED:
+        raise ValidationError(
+            "Only tickets that have been resolved (SOLVED) can be closed."
+        )
+
+    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.CLOSED)
+
+    return ticket
+
+
+@transaction.atomic
+def reopen_ticket(ticket_id, requester_user: User, reason: str) -> Ticket:
+    """
+    The requester reopens the ticket if the issue has not been fully resolved (SOLVED -> REOPEN).
+    """
+    if not reason.strip():
+        raise ValidationError("A reason for reopen is required.")
+
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+    if ticket.created_by != requester_user and not requester_user.is_superuser:
+        raise ValidationError(
+            "Only the person who created the ticket has the authority to reopen it."
+        )
+
+    latest = ticket.status_history.first()
+
+    if not latest or latest.status != TicketHistory.Status.SOLVED:
+        raise ValidationError("Only tickets with a status of SOLVED can be reopened.")
+
+    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.REOPEN)
+    return ticket
+
+
+@transaction.atomic
+def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
+    """
+    The requester cancels the request while it is still in the queue (NEW -> CANCELLED).
+    """
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+    if ticket.created_by != requester_user and not requester_user.is_superuser:
+        raise ValidationError(
+            "Only the person who created the ticket has the authority to cancel it."
+        )
+
+    latest = ticket.status_history.first()
+
+    if not latest or latest.status != TicketHistory.Status.NEW:
+        raise ValidationError("Only tickets with a status of NEW can be cancel.")
+
+    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.CANCELLED)
+
+    return ticket

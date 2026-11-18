@@ -4,7 +4,16 @@ from rest_framework import status
 from rest_framework.response import Response
 from django.core.exceptions import ValidationError
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
-from apps.tickets.services import claim_ticket, reassign_ticket, assign_ticket
+from apps.tickets.services import (
+    claim_ticket,
+    reassign_ticket,
+    assign_ticket,
+    solve_ticket,
+    reject_ticket,
+    close_ticket,
+    reopen_ticket,
+    cancel_ticket,
+)
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
 from apps.users.models import User
@@ -26,6 +35,8 @@ from apps.tickets.api.permissions import (
     IsManagerOrReadOnly,
     IsTicketAccessAllowed,
     IsManager,
+    IsSupport,
+    IsRequester,
 )
 from apps.tickets.api.filters import TicketFilter
 
@@ -89,19 +100,15 @@ class TicketViewSet(viewsets.ModelViewSet):
                     ticket=ticket, url=attachment_file, size=attachment_file.size
                 )
 
-    @action(detail=True, methods=["post"])
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
     def claim(self, request, pk=None):
-        user = request.user
-
-        if user.role != User.Role.IT_SUPPORT and not user.is_superuser:
-            return Response(
-                {"detail": "Only IT Support can claim ticket."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         ticket = self.get_object()
         try:
-            ticket = claim_ticket(ticket.id, user)
+            ticket = claim_ticket(ticket.id, request.user)
         except (ValidationError, ValueError) as ex:
             return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -167,6 +174,129 @@ class TicketViewSet(viewsets.ModelViewSet):
             ticket = reassign_ticket(ticket.id, request.user, received_by, reason)
         except (ValidationError, ValueError) as ex:
             return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
+    def solve(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = solve_ticket(ticket.id, request.user)
+        except (ValidationError, ValueError) as ex:
+            return Response(
+                {"detail": getattr(ex, "message", str(ex))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
+    def reject(self, request, pk=None):
+        user = request.user
+        if (
+            user.role not in (User.Role.IT_SUPPORT, User.Role.IT_MANAGER)
+            and not user.is_superuser
+        ):
+            return Response(
+                {
+                    "detail": "Only IT Support or a Manager has the authority to reject a ticket."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = self.get_object()
+        reason = request.data.get("reason", "").strip()
+        if not reason:
+            return Response(
+                {"reason": ["A reason for refusal is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            ticket = reject_ticket(ticket.id, user, reason)
+        except (ValidationError, ValueError) as ex:
+            return Response(
+                {"detail": getattr(ex, "message", str(ex))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def close(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = close_ticket(ticket.id, request.user)
+        except (ValidationError, ValueError) as ex:
+            return Response(
+                {"detail": getattr(ex, "message", str(ex))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def reopen(self, request, pk=None):
+        ticket = self.get_object()
+        reason = request.data.get("reason", "").strip()
+
+        if not reason:
+            return Response(
+                {"reason": ["A reason for reopen is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            ticket = reopen_ticket(ticket.id, request.user, reason)
+        except (ValidationError, ValueError) as ex:
+            return Response(
+                {"detail": getattr(ex, "message", str(ex))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def cancel(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = cancel_ticket(ticket.id, request.user)
+        except (ValidationError, ValueError) as ex:
+            return Response(
+                {"detail": getattr(ex, "message", str(ex))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = self.get_serializer(ticket)
 

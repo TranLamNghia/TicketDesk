@@ -9,6 +9,7 @@ from apps.tickets.models import (
 from apps.tickets.selectors import (
     TERMINAL_STATUSES,
     get_current_status,
+    get_solved_tickets_to_auto_close,
     is_solved_window_expired,
     is_support_busy,
 )
@@ -270,6 +271,30 @@ def close_ticket(ticket_id, requester_user: User) -> Ticket:
     _set_status(ticket, TicketHistory.Status.CLOSED)
 
     return ticket
+
+
+def auto_close_solved_tickets(now=None) -> int:
+    """
+    close every ticket that has stayed SOLVED for more than 48 hours(counted from the latest SOLVED transition).
+    """
+    candidate_ids = list(
+        get_solved_tickets_to_auto_close(now).values_list("pk", flat=True)
+    )
+    closed = 0
+
+    for ticket_id in candidate_ids:
+        with transaction.atomic():
+            ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+            if get_current_status(ticket) != TicketHistory.Status.SOLVED:
+                continue
+            if not is_solved_window_expired(ticket, now):
+                continue
+
+            _set_status(ticket, TicketHistory.Status.CLOSED)
+            closed += 1
+
+    return closed
 
 
 @transaction.atomic

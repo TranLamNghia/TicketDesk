@@ -124,6 +124,9 @@ class TicketDetailSerializer(TicketListSerializer):
 
 
 class TicketCreateSerializer(ModelSerializer):
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.all(), required=False
+    )
     attachment = serializers.FileField(required=False, write_only=True)
 
     class Meta:

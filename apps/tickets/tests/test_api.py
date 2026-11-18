@@ -68,7 +68,7 @@ class TestTicketCreationAPI:
             "category": str(category.id),
         }
 
-        response = api_client.post("/api/v1/tickets/", payload)
+        response = api_client.post("/api/v1/tickets/", payload, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["title"] == payload["title"]
@@ -86,7 +86,7 @@ class TestTicketCreationAPI:
             "category": str(category.id),
         }
 
-        response = api_client.post("/api/v1/tickets/", payload)
+        response = api_client.post("/api/v1/tickets/", payload, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "title" in response.data
@@ -200,3 +200,138 @@ class TestCommentAPI:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["count"] == 2
+
+
+class TestRequesterLifecycleAcceptance:
+    def test_requester_close_solved_ticket_success(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/close/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.CLOSED
+
+    def test_cannot_close_unsolved_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/close/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_requester_reopen_ticket_with_reason_success(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(
+            f"/api/v1/tickets/{ticket.id}/reopen/",
+            {"reason": "Máy in vẫn tiếp tục bị kẹt giấy sau khi in 5 trang."},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.REOPEN
+
+    def test_reopen_without_reason_fails(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(
+            f"/api/v1/tickets/{ticket.id}/reopen/", {"reason": "   "}
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reason" in response.data
+
+    def test_requester_cancel_new_ticket_success(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/cancel/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.CANCELLED
+
+    def test_cannot_cancel_processing_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/cancel/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_requester_edit_own_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester, title="Tiêu đề cũ chưa cập nhật")
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.patch(
+            f"/api/v1/tickets/{ticket.id}/",
+            {"title": "Tiêu đề mới đã được sửa đổi"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["title"] == "Tiêu đề mới đã được sửa đổi"
+
+
+class TestSupportLifecycleAcceptance:
+    def test_support_solve_ticket_success(self, api_client):
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(assignee=support)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
+
+        api_client.force_authenticate(user=support)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/solve/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.SOLVED
+
+    def test_other_support_cannot_solve_ticket(self, api_client):
+        support_a = UserFactory(role=User.Role.IT_SUPPORT)
+        support_b = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(assignee=support_a)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
+
+        api_client.force_authenticate(user=support_b)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/solve/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_support_reject_invalid_ticket_success(self, api_client):
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(assignee=None)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+
+        api_client.force_authenticate(user=support)
+        response = api_client.post(
+            f"/api/v1/tickets/{ticket.id}/reject/",
+            {"reason": "Yêu cầu cài đặt phần mềm ngoài phạm vi hỗ trợ của công ty."},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.REJECTED
+
+    def test_reject_without_reason_fails(self, api_client):
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(assignee=None)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+
+        api_client.force_authenticate(user=support)
+        response = api_client.post(
+            f"/api/v1/tickets/{ticket.id}/reject/", {"reason": "   "}
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reason" in response.data

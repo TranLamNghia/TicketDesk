@@ -13,6 +13,7 @@ from apps.tickets.services import (
     reopen_ticket,
     resume_ticket,
     cancel_ticket,
+    validate_ticket_update,
 )
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -112,6 +113,15 @@ class TicketViewSet(viewsets.ModelViewSet):
                 AttachmentTicket.objects.create(
                     ticket=ticket, url=attachment_file, size=attachment_file.size
                 )
+
+    def update(self, request, *args, **kwargs):
+        ticket = self.get_object()
+        try:
+            validate_ticket_update(ticket, request.user, request.data.keys())
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        return super().update(request, *args, **kwargs)
 
     @action(
         detail=True,

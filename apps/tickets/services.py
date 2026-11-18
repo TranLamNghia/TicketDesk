@@ -54,9 +54,6 @@ def _ensure_active_support(user: User, message: str) -> None:
 
 @transaction.atomic
 def claim_ticket(ticket_id, support_user: User) -> Ticket:
-    """
-    IT Support claim ticket from queue (NEW -> PROCESSING).
-    """
     # Lock row
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
 
@@ -151,9 +148,6 @@ def reassign_ticket(ticket_id, sent_by: User, received_by: User, reason: str) ->
 
 @transaction.atomic
 def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
-    """
-    Manager assigns a NEW ticket to an IT Support (NEW -> PROCESSING).
-    """
     _ensure_active_support(
         support_user, "Cannot assign ticket to an inactive or non IT Support account."
     )
@@ -195,9 +189,6 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
 
 @transaction.atomic
 def solve_ticket(ticket_id, support_user: User) -> Ticket:
-    """
-    IT Support marks the ticket as resolved (PROCESSING -> SOLVED).
-    """
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
 
     if ticket.assignee != support_user and not support_user.is_superuser:
@@ -251,9 +242,6 @@ def reject_ticket(ticket_id, support_user: User, reason: str) -> Ticket:
 
 @transaction.atomic
 def close_ticket(ticket_id, requester_user: User) -> Ticket:
-    """
-    Requester confirms ticket closure (SOLVED -> CLOSED)
-    """
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
 
     if ticket.created_by != requester_user and not requester_user.is_superuser:
@@ -353,9 +341,6 @@ def resume_ticket(ticket_id, support_user: User) -> Ticket:
 
 @transaction.atomic
 def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
-    """
-    The requester cancels the request while it is still in the queue (NEW -> CANCELLED).
-    """
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
 
     if ticket.created_by != requester_user and not requester_user.is_superuser:
@@ -371,3 +356,63 @@ def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
     _set_status(ticket, TicketHistory.Status.CANCELLED)
 
     return ticket
+
+
+REQUESTER_EDITABLE_FIELDS = frozenset({"title", "description", "category", "priority"})
+STAFF_EDITABLE_FIELDS = frozenset({"priority"})
+SUPPORT_EDITABLE_STATUSES = (
+    TicketHistory.Status.PROCESSING,
+    TicketHistory.Status.SOLVED,
+    TicketHistory.Status.REOPEN,
+)
+
+
+def validate_ticket_update(ticket: Ticket, user: User, fields) -> None:
+    """
+    Who may edit which fields of a ticket, depending on its status:
+
+    | Status                      | Role                | Editable fields                         |
+    |-----------------------------|---------------------|-----------------------------------------|
+    | NEW                         | Requester (owner)   | title, description, category, priority  |
+    | any non-final status        | IT Manager          | priority                                |
+    | PROCESSING, SOLVED, REOPEN  | Assigned IT Support | priority                                |
+    | CLOSED, REJECTED, CANCELLED | nobody              |                                         |
+    """
+    fields = set(fields)
+    current_status = get_current_status(ticket)
+
+    if current_status in TERMINAL_STATUSES:
+        raise TicketConflictError(
+            "This ticket is already finished and can no longer be edited."
+        )
+
+    if user.is_superuser:
+        allowed = REQUESTER_EDITABLE_FIELDS
+    elif user.role == User.Role.IT_MANAGER:
+        allowed = STAFF_EDITABLE_FIELDS
+    elif user.role == User.Role.IT_SUPPORT:
+        if ticket.assignee_id != user.pk:
+            raise PermissionDenied(
+                "Only the assigned IT Support can change the priority of this ticket."
+            )
+        if current_status not in SUPPORT_EDITABLE_STATUSES:
+            raise TicketConflictError(
+                "The priority can only be changed while the ticket is "
+                "PROCESSING, SOLVED or REOPEN."
+            )
+        allowed = STAFF_EDITABLE_FIELDS
+    else:
+        if ticket.created_by_id != user.pk:
+            raise PermissionDenied("You can only edit your own tickets.")
+
+        if current_status != TicketHistory.Status.NEW:
+            raise TicketConflictError(
+                "Ticket has already been claimed and can no longer be edited."
+            )
+        allowed = REQUESTER_EDITABLE_FIELDS
+
+    not_allowed = fields - allowed
+    if not_allowed:
+        raise PermissionDenied(
+            f"You are not allowed to update: {', '.join(sorted(not_allowed))}."
+        )

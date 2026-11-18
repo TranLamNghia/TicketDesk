@@ -44,6 +44,7 @@ from apps.tickets.api.permissions import (
 )
 from apps.tickets.api.exceptions import SERVICE_EXCEPTIONS, to_api_exception
 from apps.tickets.api.filters import TicketFilter
+from apps.tickets.api.throttles import enforce_ticket_creation_quota
 
 
 def _get_active_support(user_id):
@@ -103,6 +104,10 @@ class TicketViewSet(viewsets.ModelViewSet):
             return TicketCreateSerializer
 
         return TicketListSerializer
+
+    def create(self, request, *args, **kwargs):
+        enforce_ticket_creation_quota(request.user)
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         attachment_file = serializer.validated_data.pop("attachment", None)

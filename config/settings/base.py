@@ -138,3 +138,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+# Ticket creation rate limit per Requester (US06 KB4, NonFunctional_and_MoSCoW.md)
+TICKET_CREATE_LIMIT_PER_HOUR = 5
+TICKET_CREATE_LIMIT_PER_DAY = 20

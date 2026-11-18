@@ -1,12 +1,54 @@
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.core.exceptions import ValidationError
 
-from apps.tickets.models import Ticket, TicketHistory, AssignmentHistory
+from apps.tickets.models import (
+    AssignmentHistory,
+    Ticket,
+    TicketHistory,
+)
+from apps.tickets.selectors import (
+    TERMINAL_STATUSES,
+    get_current_status,
+    is_solved_window_expired,
+    is_support_busy,
+)
 from apps.users.models import User
 
 
 class TicketAlreadyCloseError(ValidationError):
     pass
+
+
+class TicketConflictError(ValidationError):
+    """
+    The request is valid but conflicts with the current state of the ticket
+    (busy IT Support, expired reopen window, locked comments...). Mapped to 409.
+    """
+
+
+def _is_staff_override(user: User) -> bool:
+    return bool(user.is_superuser or user.role == User.Role.IT_MANAGER)
+
+
+def _lock_users(*users) -> None:
+    """
+    Lock IT Support rows (stable order to avoid deadlocks) so that the
+    "max 1 PROCESSING ticket per IT Support" rule cannot be bypassed by
+    concurrent requests.
+    """
+    ids = sorted({u.pk for u in users if u is not None}, key=str)
+
+    if ids:
+        list(User.objects.select_for_update().filter(pk__in=ids).order_by("pk"))
+
+
+def _set_status(ticket: Ticket, status: str) -> TicketHistory:
+    return TicketHistory.objects.create(ticket=ticket, status=status)
+
+
+def _ensure_active_support(user: User, message: str) -> None:
+    if user is None or not user.is_active or user.role != User.Role.IT_SUPPORT:
+        raise ValidationError(message)
 
 
 @transaction.atomic
@@ -25,25 +67,26 @@ def claim_ticket(ticket_id, support_user: User) -> Ticket:
     if not latest_history or latest_history.status != TicketHistory.Status.NEW:
         raise ValidationError("Only ticket in NEW status can be accepted.")
 
+    _lock_users(support_user)
+    if is_support_busy(support_user):
+        raise TicketConflictError(
+            "You are already handling a PROCESSING ticket. "
+            "Please resolve it before claiming a new one."
+        )
+
     # Claim
     ticket.assignee = support_user
     ticket.save(update_fields=["assignee"])
 
     # Change ticket status: PROCESSING
-    TicketHistory.objects.create(
-        ticket=ticket,
-        status=TicketHistory.Status.PROCESSING,
-    )
+    _set_status(ticket, TicketHistory.Status.PROCESSING)
 
     return ticket
 
 
 @transaction.atomic
 def reassign_ticket(ticket_id, sent_by: User, received_by: User, reason: str) -> Ticket:
-    """
-    Transfer the ticket to another IT Support.
-    """
-    if not reason.strip():
+    if not reason or not reason.strip():
         raise ValidationError("Reason is required.")
 
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
@@ -53,18 +96,41 @@ def reassign_ticket(ticket_id, sent_by: User, received_by: User, reason: str) ->
             "Ticket has not been assigned yet. Use claim or assign instead."
         )
 
+    if not _is_staff_override(sent_by) and ticket.assignee_id != sent_by.pk:
+        raise PermissionDenied(
+            "You can only transfer tickets that are currently assigned to you."
+        )
+
     if ticket.assignee == received_by:
         raise ValidationError("Cannot reassign ticket to the current assignee.")
 
-    latest_history = ticket.status_history.first()
-    terminal_statuses = [
-        TicketHistory.Status.CLOSED,
-        TicketHistory.Status.CANCELLED,
-        TicketHistory.Status.REJECTED,
-    ]
-    if latest_history and latest_history.status in terminal_statuses:
+    _ensure_active_support(
+        received_by, "The receiver must be an active IT Support account."
+    )
+
+    current_status = get_current_status(ticket)
+
+    if current_status in TERMINAL_STATUSES:
         raise ValidationError(
-            f"Cannot reassign a ticket that is already {latest_history.status}."
+            f"Cannot reassign a ticket that is already {current_status}."
+        )
+
+    if current_status not in (
+        TicketHistory.Status.PROCESSING,
+        TicketHistory.Status.REOPEN,
+    ):
+        raise TicketConflictError(
+            "Only tickets in PROCESSING or REOPEN status can be reassigned."
+        )
+
+    _lock_users(ticket.assignee, received_by)
+
+    # A REOPEN ticket keeps its status: the receiver resumes it when ready.
+    if current_status == TicketHistory.Status.PROCESSING and is_support_busy(
+        received_by
+    ):
+        raise TicketConflictError(
+            "The receiver is currently handling another PROCESSING ticket."
         )
 
     # Change assignee
@@ -76,7 +142,7 @@ def reassign_ticket(ticket_id, sent_by: User, received_by: User, reason: str) ->
         ticket=ticket,
         sent_by=sent_by,
         received_by=received_by,
-        reason=reason,
+        reason=reason.strip(),
     )
 
     return ticket
@@ -87,6 +153,10 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
     """
     Manager assigns a NEW ticket to an IT Support (NEW -> PROCESSING).
     """
+    _ensure_active_support(
+        support_user, "Cannot assign ticket to an inactive or non IT Support account."
+    )
+
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
 
     if ticket.assignee is not None:
@@ -99,13 +169,18 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
     ]:
         raise ValidationError("Only tickets in NEW or REOPEN status can be assigned.")
 
+    _lock_users(support_user)
+    support_busy = is_support_busy(support_user)
+    if support_busy and latest_history.status == TicketHistory.Status.NEW:
+        raise TicketConflictError(
+            "The selected IT Support is currently handling another PROCESSING ticket."
+        )
+
     ticket.assignee = support_user
     ticket.save(update_fields=["assignee"])
 
-    TicketHistory.objects.create(
-        ticket=ticket,
-        status=TicketHistory.Status.PROCESSING,
-    )
+    if not support_busy:
+        _set_status(ticket, TicketHistory.Status.PROCESSING)
 
     AssignmentHistory.objects.create(
         ticket=ticket,
@@ -136,28 +211,39 @@ def solve_ticket(ticket_id, support_user: User) -> Ticket:
             "Only tickets in the PROCESSING state can be marked as SOLVED."
         )
 
-    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.SOLVED)
+    _set_status(ticket, TicketHistory.Status.SOLVED)
 
     return ticket
 
 
 @transaction.atomic
 def reject_ticket(ticket_id, support_user: User, reason: str) -> Ticket:
-    """
-    IT Support rejects an invalid ticket (NEW -> REJECTED).
-    """
-    if not reason.strip():
+    if not reason or not reason.strip():
         raise ValidationError("A reason for refusal is required.")
 
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
-    latest = ticket.status_history.first()
+    current_status = get_current_status(ticket)
 
-    if not latest or latest.status != TicketHistory.Status.NEW:
-        raise ValidationError("Only tickets in the NEW status can be rejected.")
+    if current_status not in (
+        TicketHistory.Status.NEW,
+        TicketHistory.Status.PROCESSING,
+    ):
+        raise ValidationError(
+            "Only tickets in the NEW or PROCESSING status can be rejected."
+        )
+
+    if (
+        current_status == TicketHistory.Status.PROCESSING
+        and not _is_staff_override(support_user)
+        and ticket.assignee_id != support_user.pk
+    ):
+        raise PermissionDenied(
+            "Only the assigned IT Support can reject a ticket that is being processed."
+        )
 
     ticket.note = f"[REJECTED by {support_user.username}]: {reason.strip()}"
     ticket.save(update_fields=["note"])
-    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.REJECTED)
+    _set_status(ticket, TicketHistory.Status.REJECTED)
 
     return ticket
 
@@ -181,17 +267,14 @@ def close_ticket(ticket_id, requester_user: User) -> Ticket:
             "Only tickets that have been resolved (SOLVED) can be closed."
         )
 
-    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.CLOSED)
+    _set_status(ticket, TicketHistory.Status.CLOSED)
 
     return ticket
 
 
 @transaction.atomic
 def reopen_ticket(ticket_id, requester_user: User, reason: str) -> Ticket:
-    """
-    The requester reopens the ticket if the issue has not been fully resolved (SOLVED -> REOPEN).
-    """
-    if not reason.strip():
+    if not reason or not reason.strip():
         raise ValidationError("A reason for reopen is required.")
 
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
@@ -206,7 +289,40 @@ def reopen_ticket(ticket_id, requester_user: User, reason: str) -> Ticket:
     if not latest or latest.status != TicketHistory.Status.SOLVED:
         raise ValidationError("Only tickets with a status of SOLVED can be reopened.")
 
-    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.REOPEN)
+    if is_solved_window_expired(ticket):
+        raise TicketConflictError(
+            "The 48-hour reopen window has expired. Please create a new ticket."
+        )
+
+    ticket.note = f"[REOPENED by {requester_user.username}]: {reason.strip()}"
+    ticket.save(update_fields=["note"])
+    _set_status(ticket, TicketHistory.Status.REOPEN)
+
+    return ticket
+
+
+@transaction.atomic
+def resume_ticket(ticket_id, support_user: User) -> Ticket:
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
+
+    if ticket.assignee is None:
+        raise ValidationError("Ticket has no assignee. Use assign instead.")
+
+    if not support_user.is_superuser and ticket.assignee_id != support_user.pk:
+        raise PermissionDenied("Only the assigned IT Support can resume this ticket.")
+
+    if get_current_status(ticket) != TicketHistory.Status.REOPEN:
+        raise TicketConflictError("Only tickets in REOPEN status can be resumed.")
+
+    _lock_users(ticket.assignee)
+    if is_support_busy(ticket.assignee):
+        raise TicketConflictError(
+            "You are already handling a PROCESSING ticket. "
+            "Please resolve it before resuming another one."
+        )
+
+    _set_status(ticket, TicketHistory.Status.PROCESSING)
+
     return ticket
 
 
@@ -227,6 +343,6 @@ def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
     if not latest or latest.status != TicketHistory.Status.NEW:
         raise ValidationError("Only tickets with a status of NEW can be cancel.")
 
-    TicketHistory.objects.create(ticket=ticket, status=TicketHistory.Status.CANCELLED)
+    _set_status(ticket, TicketHistory.Status.CANCELLED)
 
     return ticket

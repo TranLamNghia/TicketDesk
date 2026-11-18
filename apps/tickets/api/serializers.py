@@ -11,6 +11,7 @@ from apps.tickets.models import (
     TicketHistory,
     AttachmentTicket,
 )
+from apps.tickets.selectors import get_sla_due_at, is_ticket_overdue
 from apps.users.models import User
 
 
@@ -72,6 +73,8 @@ class TicketListSerializer(ModelSerializer):
 
     status = SerializerMethodField()
     has_attachment = SerializerMethodField()
+    sla_due_at = SerializerMethodField()
+    is_overdue = SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -85,6 +88,8 @@ class TicketListSerializer(ModelSerializer):
             "assignee",
             "created_at",
             "has_attachment",
+            "sla_due_at",
+            "is_overdue",
         ]
         read_only_fields = fields
 
@@ -95,6 +100,12 @@ class TicketListSerializer(ModelSerializer):
             return histories[0].status
 
         return TicketHistory.Status.NEW
+
+    def get_sla_due_at(self, obj):
+        return serializers.DateTimeField().to_representation(get_sla_due_at(obj))
+
+    def get_is_overdue(self, obj):
+        return is_ticket_overdue(obj, self.get_status(obj))
 
     def get_has_attachment(self, obj):
         return obj.attachments.exists()

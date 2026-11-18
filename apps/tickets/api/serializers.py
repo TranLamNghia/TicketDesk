@@ -10,8 +10,10 @@ from apps.tickets.models import (
     Ticket,
     TicketHistory,
     AttachmentTicket,
+    AttachmentComment,
 )
 from apps.tickets.selectors import get_sla_due_at, is_ticket_overdue
+from apps.tickets.validators import validate_image_attachment
 from apps.users.models import User
 
 
@@ -43,13 +45,34 @@ class CommentAuthorSerializer(ModelSerializer):
         fields = ["id", "username", "role"]
 
 
+class AttachmentCommentSerializer(ModelSerializer):
+    class Meta:
+        model = AttachmentComment
+        fields = ["id", "url", "size"]
+        read_only_fields = fields
+
+
 class CommentSerializer(ModelSerializer):
     author = CommentAuthorSerializer(read_only=True)
+    attachments = AttachmentCommentSerializer(many=True, read_only=True)
+    attachment = serializers.FileField(required=False, write_only=True)
 
     class Meta:
         model = Comment
-        fields = ["id", "ticket", "author", "content", "comment_at"]
-        read_only_fields = ["id", "author", "comment_at"]
+        fields = [
+            "id",
+            "ticket",
+            "author",
+            "content",
+            "comment_at",
+            "attachments",
+            "attachment",
+        ]
+        read_only_fields = ["id", "author", "comment_at", "attachments"]
+
+    def validate_attachment(self, file_obj):
+        # US14 KB4: comment attachments only accept .png/.jpg up to 5MB
+        return validate_image_attachment(file_obj)
 
     def validate_content(self, value):
         clean_content = value.strip()
@@ -162,20 +185,4 @@ class TicketCreateSerializer(ModelSerializer):
         return clean_description
 
     def validate_attachment(self, file_obj):
-        if not file_obj:
-            return None
-
-        max_size = 10 * 1024 * 1024
-
-        if file_obj.size > max_size:
-            raise serializers.ValidationError("File size must not exceed 10MB.")
-
-        forbidden_extensions = [".exe", ".bat", ".sh", ".php", ".py", ".js", ".cmd"]
-        file_name = file_obj.name.lower()
-
-        if any(file_name.endswith(ext) for ext in forbidden_extensions):
-            raise serializers.ValidationError(
-                "This file extension is forbidden for security reasons."
-            )
-
-        return file_obj
+        return validate_image_attachment(file_obj)

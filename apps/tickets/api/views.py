@@ -13,6 +13,7 @@ from apps.tickets.services import (
     reopen_ticket,
     resume_ticket,
     cancel_ticket,
+    create_comment,
     validate_ticket_update,
 )
 from django_filters.rest_framework import DjangoFilterBackend
@@ -89,6 +90,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return qs.prefetch_related(
                 "status_history",
                 "comments__author",
+                "comments__attachments",
                 "attachments",
             )
 
@@ -326,9 +328,13 @@ class TicketViewSet(viewsets.ModelViewSet):
 class CommentViewSet(viewsets.ModelViewSet):
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        qs = Comment.objects.select_related("author", "ticket")
+        qs = Comment.objects.select_related("author", "ticket").prefetch_related(
+            "attachments"
+        )
         ticket_id = self.request.query_params.get("ticket")
 
         if ticket_id:
@@ -337,4 +343,15 @@ class CommentViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        data = serializer.validated_data
+        try:
+            comment = create_comment(
+                ticket=data["ticket"],
+                author=self.request.user,
+                content=data["content"],
+                attachment=data.get("attachment"),
+            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer.instance = comment

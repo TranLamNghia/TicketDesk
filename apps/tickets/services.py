@@ -3,6 +3,8 @@ from django.db import transaction
 
 from apps.tickets.models import (
     AssignmentHistory,
+    AttachmentComment,
+    Comment,
     Ticket,
     TicketHistory,
 )
@@ -416,3 +418,52 @@ def validate_ticket_update(ticket: Ticket, user: User, fields) -> None:
         raise PermissionDenied(
             f"You are not allowed to update: {', '.join(sorted(not_allowed))}."
         )
+
+
+def validate_comment_permission(ticket: Ticket, author: User) -> None:
+    """
+    | Status                              | Who can comment                    |
+    |-------------------------------------|------------------------------------|
+    | NEW                                 | any IT Support + ticket owner      |
+    | PROCESSING, REOPEN, SOLVED (<= 48h) | assigned IT Support + ticket owner |
+    | CLOSED, REJECTED, CANCELLED         | nobody (comments locked)           |
+
+    IT Manager can only read comments.
+    """
+    current_status = get_current_status(ticket)
+
+    if not author.is_superuser:
+        if author.role == User.Role.IT_MANAGER:
+            raise PermissionDenied("IT Managers can only view comments.")
+        if author.role == User.Role.IT_SUPPORT:
+            if (
+                current_status != TicketHistory.Status.NEW
+                and ticket.assignee_id != author.pk
+            ):
+                raise PermissionDenied(
+                    "Only the assigned IT Support can comment on this ticket."
+                )
+        elif ticket.created_by_id != author.pk:
+            raise PermissionDenied("You can only comment on your own tickets.")
+
+    if current_status in TERMINAL_STATUSES or (
+        current_status == TicketHistory.Status.SOLVED
+        and is_solved_window_expired(ticket)
+    ):
+        raise TicketConflictError(
+            "Comments are locked because this ticket has been finished."
+        )
+
+
+@transaction.atomic
+def create_comment(ticket: Ticket, author: User, content: str, attachment=None):
+    validate_comment_permission(ticket, author)
+
+    comment = Comment.objects.create(ticket=ticket, author=author, content=content)
+
+    if attachment:
+        AttachmentComment.objects.create(
+            comment=comment, url=attachment, size=attachment.size
+        )
+
+    return comment

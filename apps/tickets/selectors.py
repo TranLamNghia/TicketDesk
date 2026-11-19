@@ -152,7 +152,3 @@ def get_solved_tickets_to_auto_close(now=None):
             status_changed_at__lte=now - SOLVED_WINDOW,
         )
     )
-
-
-def count_tickets_created_since(user, since) -> int:
-    return Ticket.objects.filter(created_by=user, created_at__gte=since).count()

@@ -268,3 +268,73 @@ class TestCommentAttachment:
 
         assert len(response.data["comments"]) == 1
         assert len(response.data["comments"][0]["attachments"]) == 1
+
+
+class TestCommentVisibility:
+    def test_requester_cannot_list_comments_of_another_requester_ticket(
+        self, api_client
+    ):
+        requester_1 = UserFactory(role=User.Role.REQUESTER)
+        requester_2 = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester_2)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+        CommentFactory.create_batch(2, ticket=ticket, author=requester_2)
+
+        api_client.force_authenticate(user=requester_1)
+        response = api_client.get(f"/api/v1/comments/?ticket={ticket.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 0
+
+    def test_requester_cannot_read_comment_of_another_requester_ticket(
+        self, api_client
+    ):
+        requester_1 = UserFactory(role=User.Role.REQUESTER)
+        requester_2 = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester_2)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+        comment = CommentFactory(ticket=ticket, author=requester_2)
+
+        api_client.force_authenticate(user=requester_1)
+        response = api_client.get(f"/api/v1/comments/{comment.id}/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_requester_only_sees_comments_of_own_tickets(self, api_client):
+        requester_1 = UserFactory(role=User.Role.REQUESTER)
+        requester_2 = UserFactory(role=User.Role.REQUESTER)
+        own_ticket = TicketFactory(created_by=requester_1)
+        other_ticket = TicketFactory(created_by=requester_2)
+        own_comment = CommentFactory(ticket=own_ticket)
+        CommentFactory.create_batch(3, ticket=other_ticket)
+
+        api_client.force_authenticate(user=requester_1)
+        response = api_client.get("/api/v1/comments/")
+
+        returned_ids = [item["id"] for item in response.data["results"]]
+        assert returned_ids == [str(own_comment.id)]
+
+    def test_requester_sees_support_reply_on_own_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(created_by=requester, assignee=support)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
+        CommentFactory(ticket=ticket, author=support)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.get(f"/api/v1/comments/?ticket={ticket.id}")
+
+        assert response.data["count"] == 1
+        assert response.data["results"][0]["author"]["id"] == str(support.id)
+
+    def test_manager_can_read_comments_of_any_ticket(self, api_client):
+        manager = UserFactory(role=User.Role.IT_MANAGER)
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        CommentFactory.create_batch(2, ticket=ticket)
+
+        api_client.force_authenticate(user=manager)
+        response = api_client.get(f"/api/v1/comments/?ticket={ticket.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 2

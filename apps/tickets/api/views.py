@@ -340,6 +340,13 @@ class CommentViewSet(viewsets.ModelViewSet):
         qs = Comment.objects.select_related("author", "ticket").prefetch_related(
             "attachments"
         )
+
+        # Same visibility rule as TicketViewSet: a Requester only sees
+        # comments of tickets they created.
+        user = self.request.user
+        if user.role == User.Role.REQUESTER:
+            qs = qs.filter(ticket__created_by=user)
+
         ticket_id = self.request.query_params.get("ticket")
 
         if ticket_id:

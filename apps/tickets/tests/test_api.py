@@ -190,8 +190,8 @@ class TestCommentAPI:
 
     def test_list_comments_by_ticket(self, api_client):
         user = UserFactory(role=User.Role.REQUESTER)
-        ticket_a = TicketFactory()
-        ticket_b = TicketFactory()
+        ticket_a = TicketFactory(created_by=user)
+        ticket_b = TicketFactory(created_by=user)
         CommentFactory.create_batch(2, ticket=ticket_a)
         CommentFactory.create_batch(3, ticket=ticket_b)
 

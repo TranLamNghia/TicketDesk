@@ -400,6 +400,71 @@ class TestRejectTicketRules:
         assert ticket.status_history.first().status == TicketHistory.Status.SOLVED
 
 
+class TestCloseAndCancelPermissions:
+    def test_support_cannot_close_solved_ticket(self, api_client):
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(assignee=support)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=support)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/close/")
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert ticket.status_history.first().status == TicketHistory.Status.SOLVED
+
+    def test_manager_cannot_close_solved_ticket(self, api_client):
+        manager = UserFactory(role=User.Role.IT_MANAGER)
+        ticket = TicketFactory()
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=manager)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/close/")
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert ticket.status_history.first().status == TicketHistory.Status.SOLVED
+
+    def test_requester_cannot_cancel_solved_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.SOLVED)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/cancel/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert ticket.status_history.first().status == TicketHistory.Status.SOLVED
+
+    def test_requester_cancel_reopened_ticket_success(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(created_by=requester, assignee=support)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.REOPEN)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.post(f"/api/v1/tickets/{ticket.id}/cancel/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.CANCELLED
+
+    def test_cancelling_processing_ticket_frees_the_support(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        processing_ticket = TicketFactory(created_by=requester, assignee=support)
+        TicketHistoryFactory(
+            ticket=processing_ticket, status=TicketHistory.Status.PROCESSING
+        )
+        next_ticket = TicketFactory(assignee=None)
+        TicketHistoryFactory(ticket=next_ticket, status=TicketHistory.Status.NEW)
+
+        api_client.force_authenticate(user=requester)
+        api_client.post(f"/api/v1/tickets/{processing_ticket.id}/cancel/")
+        api_client.force_authenticate(user=support)
+        response = api_client.post(f"/api/v1/tickets/{next_ticket.id}/claim/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.PROCESSING
+
+
 class TestAutoCloseSolvedTickets:
     def test_auto_close_ticket_solved_more_than_48_hours(self):
         ticket = TicketFactory()

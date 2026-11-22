@@ -43,8 +43,14 @@ from apps.tickets.api.permissions import (
     IsRequester,
 )
 from apps.tickets.api.exceptions import SERVICE_EXCEPTIONS, to_api_exception
-from apps.tickets.api.filters import TicketFilter
+from apps.tickets.api.filters import TicketFilter, TicketOrderingFilter
 from apps.tickets.api.throttles import enforce_ticket_creation_quota
+from apps.tickets.selectors import (
+    HANDLED_STATUSES,
+    PRIORITY_RANK,
+    filter_by_current_status,
+)
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
 
 def _get_active_support(user_id):
@@ -73,7 +79,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
-        filters.OrderingFilter,
+        TicketOrderingFilter,
     ]
     filterset_class = TicketFilter
     search_fields = ["title", "description"]
@@ -104,6 +110,63 @@ class TicketViewSet(viewsets.ModelViewSet):
             return TicketCreateSerializer
 
         return TicketListSerializer
+
+    def _paginated_response(self, queryset):
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def queue(self, request):
+        """
+        US11: NEW tickets nobody has taken yet, URGENT first, then oldest first.
+        Requesters are refused (KB4). Supports ?priority, ?category, ?search.
+        """
+        qs = filter_by_current_status(
+            self.get_queryset(), [TicketHistory.Status.NEW]
+        ).filter(assignee__isnull=True)
+        qs = filters.SearchFilter().filter_queryset(request, qs, self)
+        qs = self._apply_ticket_filter(request, qs)
+        qs = qs.annotate(priority_rank=PRIORITY_RANK).order_by(
+            "-priority_rank", "created_at"
+        )
+        return self._paginated_response(qs)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def handled(self, request):
+        """
+        US20 / US21: SOLVED, CLOSED and REJECTED tickets.
+        - IT Support only sees tickets they handled (?assignee is ignored).
+        - IT Manager sees every IT Support and can filter with ?assignee=<id>.
+        """
+        user = request.user
+        qs = filter_by_current_status(self.get_queryset(), HANDLED_STATUSES)
+        params = request.query_params.copy()
+
+        if not (user.is_superuser or user.role == User.Role.IT_MANAGER):
+            qs = qs.filter(assignee=user)
+            params.pop("assignee", None)
+
+        qs = self._apply_ticket_filter(request, qs, params)
+        return self._paginated_response(qs.order_by("-created_at"))
+
+    def _apply_ticket_filter(self, request, queryset, params=None):
+        filterset = TicketFilter(
+            params if params is not None else request.query_params,
+            queryset=queryset,
+            request=request,
+        )
+        if not filterset.is_valid():
+            raise DRFValidationError(filterset.errors)
+        return filterset.qs
 
     def create(self, request, *args, **kwargs):
         enforce_ticket_creation_quota(request.user)

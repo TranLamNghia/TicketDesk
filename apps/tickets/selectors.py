@@ -1,5 +1,14 @@
 from datetime import timedelta
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import (
+    Case,
+    Count,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
 from django.utils import timezone
 from apps.tickets.models import Ticket, TicketHistory
 
@@ -81,6 +90,30 @@ TERMINAL_STATUSES = (
 # Window during which a SOLVED ticket can be reopened / is auto-closed after.
 SOLVED_WINDOW = timedelta(hours=48)
 
+# Tickets that count as "handled" in the history pages (US20, US21).
+HANDLED_STATUSES = (
+    TicketHistory.Status.SOLVED,
+    TicketHistory.Status.CLOSED,
+    TicketHistory.Status.REJECTED,
+)
+
+# Statuses a Requester can still cancel (US10).
+CANCELLABLE_STATUSES = (
+    TicketHistory.Status.NEW,
+    TicketHistory.Status.PROCESSING,
+    TicketHistory.Status.REOPEN,
+)
+
+# Priority as a number so it can be sorted by severity (US11 KB1).
+PRIORITY_RANK = Case(
+    When(priority=Ticket.Priority.URGENT, then=Value(4)),
+    When(priority=Ticket.Priority.HIGH, then=Value(3)),
+    When(priority=Ticket.Priority.MEDIUM, then=Value(2)),
+    When(priority=Ticket.Priority.LOW, then=Value(1)),
+    default=Value(0),
+    output_field=IntegerField(),
+)
+
 
 def get_current_status(ticket: Ticket) -> str:
     """Latest status of a ticket. A ticket without history is considered NEW."""
@@ -119,8 +152,35 @@ def is_ticket_overdue(ticket: Ticket, current_status: str, now=None) -> bool:
     return now > get_sla_due_at(ticket)
 
 
+def get_resolved_at(histories):
+    """
+    Time of the latest SOLVED transition, read from an already loaded list of
+    TicketHistory rows (prefetched, so no extra query). None if never solved.
+    """
+    solved_times = [
+        history.update_status_at
+        for history in histories
+        if history.status == TicketHistory.Status.SOLVED
+    ]
+    return max(solved_times) if solved_times else None
+
+
+def is_resolved_late(ticket: Ticket, resolved_at) -> bool:
+    """US21 KB3: the ticket was resolved after its SLA deadline."""
+    return resolved_at is not None and resolved_at > get_sla_due_at(ticket)
+
+
 def tickets_with_current_status():
     return Ticket.objects.annotate(current_status=Subquery(get_lastest_status_ticket()))
+
+
+def filter_by_current_status(queryset, statuses):
+    """Keep tickets whose latest status (not any past status) is in `statuses`."""
+    if "latest_status" not in queryset.query.annotations:
+        queryset = queryset.annotate(
+            latest_status=Subquery(get_lastest_status_ticket())
+        )
+    return queryset.filter(latest_status__in=statuses)
 
 
 def get_processing_tickets_of(support_user):

@@ -12,7 +12,12 @@ from apps.tickets.models import (
     AttachmentTicket,
     AttachmentComment,
 )
-from apps.tickets.selectors import get_sla_due_at, is_ticket_overdue
+from apps.tickets.selectors import (
+    get_resolved_at,
+    get_sla_due_at,
+    is_resolved_late,
+    is_ticket_overdue,
+)
 from apps.tickets.validators import validate_image_attachment
 from apps.users.models import User
 
@@ -98,6 +103,8 @@ class TicketListSerializer(ModelSerializer):
     has_attachment = SerializerMethodField()
     sla_due_at = SerializerMethodField()
     is_overdue = SerializerMethodField()
+    resolved_at = SerializerMethodField()
+    is_resolved_late = SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -113,6 +120,8 @@ class TicketListSerializer(ModelSerializer):
             "has_attachment",
             "sla_due_at",
             "is_overdue",
+            "resolved_at",
+            "is_resolved_late",
         ]
         read_only_fields = fields
 
@@ -129,6 +138,17 @@ class TicketListSerializer(ModelSerializer):
 
     def get_is_overdue(self, obj):
         return is_ticket_overdue(obj, self.get_status(obj))
+
+    def get_resolved_at(self, obj):
+        # Latest SOLVED time, from the prefetched status history (no extra query)
+        resolved_at = get_resolved_at(obj.status_history.all())
+        if resolved_at is None:
+            return None
+        return serializers.DateTimeField().to_representation(resolved_at)
+
+    def get_is_resolved_late(self, obj):
+        # US21 KB3: resolved after the SLA deadline
+        return is_resolved_late(obj, get_resolved_at(obj.status_history.all()))
 
     def get_has_attachment(self, obj):
         return obj.attachments.exists()

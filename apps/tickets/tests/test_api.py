@@ -262,15 +262,17 @@ class TestRequesterLifecycleAcceptance:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["status"] == TicketHistory.Status.CANCELLED
 
-    def test_cannot_cancel_processing_ticket(self, api_client):
+    def test_requester_cancel_processing_ticket_success(self, api_client):
         requester = UserFactory(role=User.Role.REQUESTER)
-        ticket = TicketFactory(created_by=requester)
+        support = UserFactory(role=User.Role.IT_SUPPORT)
+        ticket = TicketFactory(created_by=requester, assignee=support)
         TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.PROCESSING)
 
         api_client.force_authenticate(user=requester)
         response = api_client.post(f"/api/v1/tickets/{ticket.id}/cancel/")
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == TicketHistory.Status.CANCELLED
 
     def test_requester_edit_own_ticket(self, api_client):
         requester = UserFactory(role=User.Role.REQUESTER)

@@ -9,6 +9,7 @@ from apps.tickets.models import (
     TicketHistory,
 )
 from apps.tickets.selectors import (
+    CANCELLABLE_STATUSES,
     TERMINAL_STATUSES,
     get_current_status,
     get_solved_tickets_to_auto_close,
@@ -350,10 +351,11 @@ def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
             "Only the person who created the ticket has the authority to cancel it."
         )
 
-    latest = ticket.status_history.first()
-
-    if not latest or latest.status != TicketHistory.Status.NEW:
-        raise ValidationError("Only tickets with a status of NEW can be cancel.")
+    # US10 KB2: a ticket can also be cancelled while it is being processed
+    if get_current_status(ticket) not in CANCELLABLE_STATUSES:
+        raise ValidationError(
+            "Only tickets in NEW, PROCESSING or REOPEN status can be cancelled."
+        )
 
     _set_status(ticket, TicketHistory.Status.CANCELLED)
 

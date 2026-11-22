@@ -26,6 +26,36 @@ class TestLogin:
         assert "access" in response.data
         assert "refresh" in response.data
 
+    def test_it_support_login_returns_tokens(self, api_client):
+        UserFactory(
+            username="itsupport01", password="Matkhau123", role=User.Role.IT_SUPPORT
+        )
+
+        response = api_client.post(
+            "/api/v1/auth/token/",
+            {"username": "itsupport01", "password": "Matkhau123"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "access" in response.data
+        assert "refresh" in response.data
+
+    def test_access_token_can_call_protected_api(self, api_client):
+        UserFactory(
+            username="itsupport01", password="Matkhau123", role=User.Role.IT_SUPPORT
+        )
+        token_response = api_client.post(
+            "/api/v1/auth/token/",
+            {"username": "itsupport01", "password": "Matkhau123"},
+        )
+
+        api_client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {token_response.data['access']}"
+        )
+        response = api_client.get("/api/v1/tickets/")
+
+        assert response.status_code == status.HTTP_200_OK
+
     def test_login_with_wrong_password_fails(self, api_client):
         UserFactory(username="requester01", password="Matkhau123")
 

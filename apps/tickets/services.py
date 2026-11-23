@@ -16,7 +16,7 @@ from apps.tickets.selectors import (
     is_solved_window_expired,
     is_support_busy,
 )
-from apps.tickets.tasks import (
+from apps.notifications.tasks import (
     send_comment_notification_email,
     send_ticket_assigned_email,
     send_ticket_status_changed_email,

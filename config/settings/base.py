@@ -1,6 +1,7 @@
 from pathlib import Path
 import environ
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Root: /TTTN/ticketdesk/ (parent 3 level)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -157,3 +158,9 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+CELERY_BEAT_SCHEDULE = {
+    "auto-close-solved-tickets-every-15-mins": {
+        "task": "apps.tickets.tasks.auto_close_solved_tickets_task",
+        "schedule": crontab(minute="*/15"),
+    },
+}

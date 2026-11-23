@@ -5,13 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "celery>=5.7.0",
     "django>=6.1.2",
     "django-environ>=0.14.0",
     "django-filter>=26.2",
     "djangorestframework>=3.18.3",
     "djangorestframework-simplejwt>=5.5.1",
     "drf-spectacular>=0.30.0",
+    "openpyxl>=3.1.5",
     "psycopg[binary]>=3.3.6",
+    "redis>=8.1.0",
 ]
 
 [project.scripts]

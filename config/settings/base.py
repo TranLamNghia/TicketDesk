@@ -147,3 +147,13 @@ COMPANY_EMAIL_DOMAIN = env("COMPANY_EMAIL_DOMAIN", default="rainscales.com")
 # Ticket creation rate limit per Requester (US06 KB4, NonFunctional_and_MoSCoW.md)
 TICKET_CREATE_LIMIT_PER_HOUR = 5
 TICKET_CREATE_LIMIT_PER_DAY = 20
+
+# Celery Configuration
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://localhost:6379/0")
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"

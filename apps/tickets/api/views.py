@@ -2,10 +2,22 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
-from django.core.exceptions import ValidationError
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
-from apps.tickets.services import claim_ticket, reassign_ticket, assign_ticket
+from apps.tickets.services import (
+    claim_ticket,
+    reassign_ticket,
+    assign_ticket,
+    solve_ticket,
+    reject_ticket,
+    close_ticket,
+    reopen_ticket,
+    resume_ticket,
+    cancel_ticket,
+    create_comment,
+    validate_ticket_update,
+)
 from django_filters.rest_framework import DjangoFilterBackend
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from apps.users.models import User
 from apps.tickets.models import (
@@ -26,8 +38,29 @@ from apps.tickets.api.permissions import (
     IsManagerOrReadOnly,
     IsTicketAccessAllowed,
     IsManager,
+    IsSupport,
+    IsSupportOrManager,
+    IsRequester,
 )
-from apps.tickets.api.filters import TicketFilter
+from apps.tickets.api.exceptions import SERVICE_EXCEPTIONS, to_api_exception
+from apps.tickets.api.filters import TicketFilter, TicketOrderingFilter
+from apps.tickets.api.throttles import enforce_ticket_creation_quota
+from apps.tickets.selectors import (
+    HANDLED_STATUSES,
+    PRIORITY_RANK,
+    filter_by_current_status,
+)
+from rest_framework.exceptions import ValidationError as DRFValidationError
+
+
+def _get_active_support(user_id):
+    """Only active IT Support accounts can receive a ticket."""
+    if not user_id:
+        return None
+    try:
+        return User.objects.get(id=user_id, role=User.Role.IT_SUPPORT, is_active=True)
+    except (User.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+        return None
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -41,12 +74,15 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsTicketAccessAllowed]
+    # Tickets are never deleted: finished tickets keep their history
+    # (use the cancel / reject actions instead).
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
-        filters.OrderingFilter,
+        TicketOrderingFilter,
     ]
     filterset_class = TicketFilter
     search_fields = ["title", "description"]
@@ -64,6 +100,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return qs.prefetch_related(
                 "status_history",
                 "comments__author",
+                "comments__attachments",
                 "attachments",
             )
 
@@ -72,10 +109,71 @@ class TicketViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == "retrieve":
             return TicketDetailSerializer
-        elif self.action == "create":
+        elif self.action in ("create", "update", "partial_update"):
             return TicketCreateSerializer
 
         return TicketListSerializer
+
+    def _paginated_response(self, queryset):
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def queue(self, request):
+        """
+        US11: NEW tickets nobody has taken yet, URGENT first, then oldest first.
+        Requesters are refused (KB4). Supports ?priority, ?category, ?search.
+        """
+        qs = filter_by_current_status(
+            self.get_queryset(), [TicketHistory.Status.NEW]
+        ).filter(assignee__isnull=True)
+        qs = filters.SearchFilter().filter_queryset(request, qs, self)
+        qs = self._apply_ticket_filter(request, qs)
+        qs = qs.annotate(priority_rank=PRIORITY_RANK).order_by(
+            "-priority_rank", "created_at"
+        )
+        return self._paginated_response(qs)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def handled(self, request):
+        """
+        US20 / US21: SOLVED, CLOSED and REJECTED tickets.
+        - IT Support only sees tickets they handled (?assignee is ignored).
+        - IT Manager sees every IT Support and can filter with ?assignee=<id>.
+        """
+        user = request.user
+        qs = filter_by_current_status(self.get_queryset(), HANDLED_STATUSES)
+        params = request.query_params.copy()
+
+        if not (user.is_superuser or user.role == User.Role.IT_MANAGER):
+            qs = qs.filter(assignee=user)
+            params.pop("assignee", None)
+
+        qs = self._apply_ticket_filter(request, qs, params)
+        return self._paginated_response(qs.order_by("-created_at"))
+
+    def _apply_ticket_filter(self, request, queryset, params=None):
+        filterset = TicketFilter(
+            params if params is not None else request.query_params,
+            queryset=queryset,
+            request=request,
+        )
+        if not filterset.is_valid():
+            raise DRFValidationError(filterset.errors)
+        return filterset.qs
+
+    def create(self, request, *args, **kwargs):
+        enforce_ticket_creation_quota(request.user)
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         attachment_file = serializer.validated_data.pop("attachment", None)
@@ -89,21 +187,26 @@ class TicketViewSet(viewsets.ModelViewSet):
                     ticket=ticket, url=attachment_file, size=attachment_file.size
                 )
 
-    @action(detail=True, methods=["post"])
-    def claim(self, request, pk=None):
-        user = request.user
-
-        if user.role != User.Role.IT_SUPPORT and not user.is_superuser:
-            return Response(
-                {"detail": "Only IT Support can claim ticket."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+    def update(self, request, *args, **kwargs):
         ticket = self.get_object()
         try:
-            ticket = claim_ticket(ticket.id, user)
-        except (ValidationError, ValueError) as ex:
-            return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+            validate_ticket_update(ticket, request.user, request.data.keys())
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        return super().update(request, *args, **kwargs)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
+    def claim(self, request, pk=None):
+        ticket = self.get_object()
+        try:
+            ticket = claim_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -122,32 +225,33 @@ class TicketViewSet(viewsets.ModelViewSet):
                 {"support_id": ["This feild is required."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            support_user = User.objects.get(id=support_id, role=User.Role.IT_SUPPORT)
-        except User.DoesNotExist:
+
+        support_user = _get_active_support(support_id)
+        if support_user is None:
             return Response(
-                {"support_id": ["IT Support not found."]},
+                {"support_id": ["IT Support not found or inactive."]},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         try:
             ticket = assign_ticket(ticket.id, support_user, request.user)
-        except (ValidationError, ValueError) as ex:
-            return Response(
-                {"detail": getattr(ex, "message", str(ex))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
         serializer = self.get_serializer(ticket)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
         detail=True,
         methods=["post"],
-        permission_classes=[permissions.IsAuthenticated, IsManager],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
     )
     def reassign(self, request, pk=None):
         ticket = self.get_object()
-        received_by_id = request.data.get("received_by")
-        reason = request.data.get("reason", "").strip()
+        received_by_id = request.data.get("received_by") or request.data.get(
+            "assignee_id"
+        )
+        reason = (request.data.get("reason") or "").strip()
 
         if not received_by_id:
             return Response(
@@ -155,18 +259,137 @@ class TicketViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            received_by = User.objects.get(id=received_by_id, role=User.Role.IT_SUPPORT)
-        except User.DoesNotExist:
+        if not reason:
             return Response(
-                {"received_by": ["IT Support not found."]},
+                {"reason": ["Please enter a reason for transferring the ticket."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        received_by = _get_active_support(received_by_id)
+        if received_by is None:
+            return Response(
+                {"received_by": ["IT Support not found or inactive."]},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
             ticket = reassign_ticket(ticket.id, request.user, received_by, reason)
-        except (ValidationError, ValueError) as ex:
-            return Response({"detail": str(ex)}, status=status.HTTP_400_BAD_REQUEST)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
+    def solve(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = solve_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupport],
+    )
+    def resume(self, request, pk=None):
+        # US15 KB4: the assigned IT Support continues a REOPEN ticket
+        # (REOPEN -> PROCESSING) when they choose to.
+        ticket = self.get_object()
+
+        try:
+            ticket = resume_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
+    )
+    def reject(self, request, pk=None):
+        ticket = self.get_object()
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {"reason": ["A reason for refusal is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            ticket = reject_ticket(ticket.id, request.user, reason)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def close(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = close_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def reopen(self, request, pk=None):
+        ticket = self.get_object()
+        reason = (request.data.get("reason") or "").strip()
+
+        if not reason:
+            return Response(
+                {"reason": ["A reason for reopen is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            ticket = reopen_ticket(ticket.id, request.user, reason)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer = self.get_serializer(ticket)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[permissions.IsAuthenticated, IsRequester],
+    )
+    def cancel(self, request, pk=None):
+        ticket = self.get_object()
+
+        try:
+            ticket = cancel_ticket(ticket.id, request.user)
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
 
@@ -176,9 +399,20 @@ class TicketViewSet(viewsets.ModelViewSet):
 class CommentViewSet(viewsets.ModelViewSet):
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        qs = Comment.objects.select_related("author", "ticket")
+        qs = Comment.objects.select_related("author", "ticket").prefetch_related(
+            "attachments"
+        )
+
+        # Same visibility rule as TicketViewSet: a Requester only sees
+        # comments of tickets they created.
+        user = self.request.user
+        if user.role == User.Role.REQUESTER:
+            qs = qs.filter(ticket__created_by=user)
+
         ticket_id = self.request.query_params.get("ticket")
 
         if ticket_id:
@@ -187,4 +421,15 @@ class CommentViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        data = serializer.validated_data
+        try:
+            comment = create_comment(
+                ticket=data["ticket"],
+                author=self.request.user,
+                content=data["content"],
+                attachment=data.get("attachment"),
+            )
+        except SERVICE_EXCEPTIONS as ex:
+            raise to_api_exception(ex)
+
+        serializer.instance = comment

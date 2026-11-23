@@ -23,6 +23,8 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     # Ticket & Category APIs
     path("api/v1/", include("apps.tickets.api.urls")),
+    # IT Support list
+    path("api/v1/", include("apps.users.api.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/swagger/",

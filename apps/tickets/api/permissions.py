@@ -23,6 +23,36 @@ class IsManagerOrReadOnly(BasePermission):
         )
 
 
+class IsSupport(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.role == User.Role.IT_SUPPORT or request.user.is_superuser)
+        )
+
+
+class IsSupportOrManager(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (
+                request.user.role in (User.Role.IT_SUPPORT, User.Role.IT_MANAGER)
+                or request.user.is_superuser
+            )
+        )
+
+
+class IsRequester(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.role == User.Role.REQUESTER or request.user.is_superuser)
+        )
+
+
 class IsTicketAccessAllowed(BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user

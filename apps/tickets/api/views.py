@@ -74,6 +74,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsTicketAccessAllowed]
+    # Tickets are never deleted: finished tickets keep their history
+    # (use the cancel / reject actions instead).
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [

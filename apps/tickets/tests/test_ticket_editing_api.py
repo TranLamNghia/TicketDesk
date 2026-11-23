@@ -2,7 +2,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.tickets.models import TicketHistory
+from apps.tickets.models import Ticket, TicketHistory
 from apps.tickets.tests.factories import (
     TicketFactory,
     TicketHistoryFactory,
@@ -171,3 +171,27 @@ class TestSupportAndManagerChangePriority:
         ticket.refresh_from_db()
         assert response.status_code == status.HTTP_409_CONFLICT
         assert ticket.priority == "LOW"
+
+
+class TestTicketDeletion:
+    def test_requester_cannot_delete_own_ticket(self, api_client):
+        requester = UserFactory(role=User.Role.REQUESTER)
+        ticket = TicketFactory(created_by=requester)
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.NEW)
+
+        api_client.force_authenticate(user=requester)
+        response = api_client.delete(f"/api/v1/tickets/{ticket.id}/")
+
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        assert Ticket.objects.filter(pk=ticket.pk).exists()
+
+    def test_manager_cannot_delete_ticket(self, api_client):
+        manager = UserFactory(role=User.Role.IT_MANAGER)
+        ticket = TicketFactory()
+        TicketHistoryFactory(ticket=ticket, status=TicketHistory.Status.CLOSED)
+
+        api_client.force_authenticate(user=manager)
+        response = api_client.delete(f"/api/v1/tickets/{ticket.id}/")
+
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        assert Ticket.objects.filter(pk=ticket.pk).exists()

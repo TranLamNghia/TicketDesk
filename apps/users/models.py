@@ -1,6 +1,8 @@
 import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 
 class User(AbstractUser):
@@ -18,6 +20,15 @@ class User(AbstractUser):
     class Meta:
         db_table = "users"
         verbose_name_plural = "Users"
+        constraints = [
+            # US01 KB2: one account per email (case-insensitive). Blank emails
+            # (accounts created in Django Admin) are not checked.
+            models.UniqueConstraint(
+                Lower("email"),
+                condition=~Q(email=""),
+                name="user_email_unique_ci",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"

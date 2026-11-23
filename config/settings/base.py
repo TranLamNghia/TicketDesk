@@ -26,6 +26,7 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "django_filters",
     "drf_spectacular",
+    "rest_framework_simplejwt.token_blacklist",
 ]
 
 LOCAL_APPS = [
@@ -103,6 +104,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {"NAME": "apps.users.validators.LetterAndDigitPasswordValidator"},
 ]
 
 # Language and Time Zone
@@ -136,8 +138,11 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+COMPANY_EMAIL_DOMAIN = env("COMPANY_EMAIL_DOMAIN", default="rainscales.com")
 
 # Ticket creation rate limit per Requester (US06 KB4, NonFunctional_and_MoSCoW.md)
 TICKET_CREATE_LIMIT_PER_HOUR = 5

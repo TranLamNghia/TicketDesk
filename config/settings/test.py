@@ -11,4 +11,4 @@ DEBUG = False
 
 CELERY_TASK_ALWAYS_EAGER = True
 
-SECRET_KEY = "test-secret-key-ticketdesk"
+SECRET_KEY = "test-secret-key-ticketdesk-only-for-pytest-runs"

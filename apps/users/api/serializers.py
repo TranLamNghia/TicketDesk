@@ -24,6 +24,32 @@ class ITSupportSerializer(ModelSerializer):
         return {"id": str(ticket_id), "title": obj.current_ticket_title}
 
 
+class GrantITSupportSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+
+
+class ITSupportUpdateSerializer(ModelSerializer):
+    username = serializers.CharField(
+        max_length=150, validators=[UnicodeUsernameValidator()]
+    )
+
+    class Meta:
+        model = User
+        fields = ["username"]
+
+    def validate_username(self, value):
+        taken = (
+            User.objects.filter(username__iexact=value)
+            .exclude(pk=self.instance.pk)
+            .exists()
+        )
+
+        if taken:
+            raise serializers.ValidationError("This username is already taken.")
+
+        return value
+
+
 def _run_password_validators(password, user, field_name):
     try:
         validate_password(password, user=user)

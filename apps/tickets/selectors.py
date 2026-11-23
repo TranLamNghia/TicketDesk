@@ -183,6 +183,16 @@ def filter_by_current_status(queryset, statuses):
     return queryset.filter(latest_status__in=statuses)
 
 
+def get_active_tickets_of(support_user):
+    return tickets_with_current_status().filter(
+        assignee=support_user,
+        current_status__in=(
+            TicketHistory.Status.PROCESSING,
+            TicketHistory.Status.REOPEN,
+        ),
+    )
+
+
 def get_processing_tickets_of(support_user):
     return tickets_with_current_status().filter(
         assignee=support_user, current_status=TicketHistory.Status.PROCESSING

@@ -16,6 +16,11 @@ from apps.tickets.selectors import (
     is_solved_window_expired,
     is_support_busy,
 )
+from apps.tickets.tasks import (
+    send_comment_notification_email,
+    send_ticket_assigned_email,
+    send_ticket_status_changed_email,
+)
 from apps.users.models import User
 
 
@@ -82,6 +87,10 @@ def claim_ticket(ticket_id, support_user: User) -> Ticket:
     # Change ticket status: PROCESSING
     _set_status(ticket, TicketHistory.Status.PROCESSING)
 
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
+
     return ticket
 
 
@@ -146,6 +155,14 @@ def reassign_ticket(ticket_id, sent_by: User, received_by: User, reason: str) ->
         reason=reason.strip(),
     )
 
+    transaction.on_commit(
+        lambda: send_ticket_assigned_email.delay(
+            ticket_id=str(ticket.pk),
+            assignee_id=str(received_by.pk),
+            reason=reason,
+        )
+    )
+
     return ticket
 
 
@@ -187,6 +204,12 @@ def assign_ticket(ticket_id, support_user: User, assigned_by: User) -> Ticket:
         reason="Initial assignment by Manager.",
     )
 
+    transaction.on_commit(
+        lambda: send_ticket_assigned_email.delay(
+            ticket_id=str(ticket.id), assignee_id=str(support_user.pk)
+        )
+    )
+
     return ticket
 
 
@@ -207,6 +230,10 @@ def solve_ticket(ticket_id, support_user: User) -> Ticket:
         )
 
     _set_status(ticket, TicketHistory.Status.SOLVED)
+
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
 
     return ticket
 
@@ -240,6 +267,10 @@ def reject_ticket(ticket_id, support_user: User, reason: str) -> Ticket:
     ticket.save(update_fields=["note"])
     _set_status(ticket, TicketHistory.Status.REJECTED)
 
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
+
     return ticket
 
 
@@ -260,6 +291,10 @@ def close_ticket(ticket_id, requester_user: User) -> Ticket:
         )
 
     _set_status(ticket, TicketHistory.Status.CLOSED)
+
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
 
     return ticket
 
@@ -314,6 +349,10 @@ def reopen_ticket(ticket_id, requester_user: User, reason: str) -> Ticket:
     ticket.save(update_fields=["note"])
     _set_status(ticket, TicketHistory.Status.REOPEN)
 
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
+
     return ticket
 
 
@@ -339,6 +378,10 @@ def resume_ticket(ticket_id, support_user: User) -> Ticket:
 
     _set_status(ticket, TicketHistory.Status.PROCESSING)
 
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
+
     return ticket
 
 
@@ -358,6 +401,10 @@ def cancel_ticket(ticket_id, requester_user: User) -> Ticket:
         )
 
     _set_status(ticket, TicketHistory.Status.CANCELLED)
+
+    transaction.on_commit(
+        lambda: send_ticket_status_changed_email.delay(ticket_id=str(ticket.pk))
+    )
 
     return ticket
 
@@ -467,5 +514,9 @@ def create_comment(ticket: Ticket, author: User, content: str, attachment=None):
         AttachmentComment.objects.create(
             comment=comment, url=attachment, size=attachment.size
         )
+
+    transaction.on_commit(
+        lambda: send_comment_notification_email.delay(comment_id=str(comment.pk))
+    )
 
     return comment

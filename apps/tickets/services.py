@@ -19,6 +19,7 @@ from apps.tickets.selectors import (
     get_solved_tickets_to_auto_close,
     is_solved_window_expired,
     is_support_busy,
+    invalidate_overview_kpis_cache,
 )
 from apps.notifications.tasks import (
     send_comment_notification_email,
@@ -56,6 +57,7 @@ def _lock_users(*users) -> None:
 
 
 def _set_status(ticket: Ticket, status: str) -> TicketHistory:
+    transaction.on_commit(invalidate_overview_kpis_cache)
     return TicketHistory.objects.create(ticket=ticket, status=status)
 
 

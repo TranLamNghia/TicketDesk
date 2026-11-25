@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from datetime import timedelta
 from django.db.models import (
     Case,
@@ -52,8 +53,20 @@ def count_solved_ticket_per_IT_Support():
     return stats
 
 
+OVERVIEW_KPIS_CACHE_KEY = "dashboard_overview_kpis"
+
+
+def invalidate_overview_kpis_cache() -> None:
+    cache.delete(OVERVIEW_KPIS_CACHE_KEY)
+
+
 # Overview KPIs
-def get_overview_kpis():
+def get_overview_kpis(use_cache: bool = True):
+    if use_cache:
+        cached_data = cache.get(OVERVIEW_KPIS_CACHE_KEY)
+        if cached_data is not None:
+            return cached_data
+
     SOLVED_STATUSES = [TicketHistory.Status.SOLVED, TicketHistory.Status.CLOSED]
 
     tickets_status = Ticket.objects.annotate(
@@ -66,6 +79,9 @@ def get_overview_kpis():
         unassigned_tickets=Count("id", filter=Q(assignee__isnull=True)),
         solved_tickets=Count("id", filter=Q(current_status__in=SOLVED_STATUSES)),
     )
+
+    if use_cache:
+        cache.set(OVERVIEW_KPIS_CACHE_KEY, kpis, timeout=300)
 
     return kpis
 

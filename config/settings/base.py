@@ -164,3 +164,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/15"),
     },
 }
+
+# Cache Configuration with Redis
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("REDIS_CACHE_URL", default="redis://localhost:6379/1"),
+        "KEY_PREFIX": "ticketdesk",
+        "TIMEOUT": 300,  # 5 phút
+    }
+}

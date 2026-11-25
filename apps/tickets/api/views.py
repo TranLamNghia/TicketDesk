@@ -3,6 +3,9 @@ from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
+from pathlib import Path
+from django.http import FileResponse, Http404
+
 from apps.tickets.services import (
     claim_ticket,
     reassign_ticket,
@@ -399,19 +402,22 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
-        methods=["post"],
+        methods=["get"],
         url_path="export-excel",
         permission_classes=[IsSupportOrManager],
     )
     def export_excel(self, request):
         task = export_tickets_excel_task.delay(user_id=str(request.user.pk))
 
-        return Response(
-            {
-                "detail": "Yêu cầu xuất báo cáo Excel đã được tiếp nhận và đang xử lý ngầm.",
-                "task_id": task.id,
-            },
-            status=status.HTTP_202_ACCEPTED,
+        file_path = Path(task.get(timeout=30))
+        if not file_path.exists():
+            raise Http404("File báo cáo không tồn tại.")
+
+        return FileResponse(
+            open(file_path, "rb"),
+            as_attachment=True,
+            filename=file_path.name,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
 

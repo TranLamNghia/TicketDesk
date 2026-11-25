@@ -51,6 +51,7 @@ from apps.tickets.selectors import (
     filter_by_current_status,
 )
 from rest_framework.exceptions import ValidationError as DRFValidationError
+from apps.tickets.tasks import export_tickets_excel_task
 
 
 def _get_active_support(user_id):
@@ -117,6 +118,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     def _paginated_response(self, queryset):
         page = self.paginate_queryset(queryset)
         serializer = self.get_serializer(page, many=True)
+
         return self.get_paginated_response(serializer.data)
 
     @action(
@@ -125,10 +127,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
     )
     def queue(self, request):
-        """
-        US11: NEW tickets nobody has taken yet, URGENT first, then oldest first.
-        Requesters are refused (KB4). Supports ?priority, ?category, ?search.
-        """
         qs = filter_by_current_status(
             self.get_queryset(), [TicketHistory.Status.NEW]
         ).filter(assignee__isnull=True)
@@ -137,6 +135,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         qs = qs.annotate(priority_rank=PRIORITY_RANK).order_by(
             "-priority_rank", "created_at"
         )
+
         return self._paginated_response(qs)
 
     @action(
@@ -145,11 +144,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated, IsSupportOrManager],
     )
     def handled(self, request):
-        """
-        US20 / US21: SOLVED, CLOSED and REJECTED tickets.
-        - IT Support only sees tickets they handled (?assignee is ignored).
-        - IT Manager sees every IT Support and can filter with ?assignee=<id>.
-        """
         user = request.user
         qs = filter_by_current_status(self.get_queryset(), HANDLED_STATUSES)
         params = request.query_params.copy()
@@ -159,6 +153,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             params.pop("assignee", None)
 
         qs = self._apply_ticket_filter(request, qs, params)
+
         return self._paginated_response(qs.order_by("-created_at"))
 
     def _apply_ticket_filter(self, request, queryset, params=None):
@@ -167,12 +162,15 @@ class TicketViewSet(viewsets.ModelViewSet):
             queryset=queryset,
             request=request,
         )
+
         if not filterset.is_valid():
             raise DRFValidationError(filterset.errors)
+
         return filterset.qs
 
     def create(self, request, *args, **kwargs):
         enforce_ticket_creation_quota(request.user)
+
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
@@ -220,6 +218,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     def assign(self, request, pk=None):
         ticket = self.get_object()
         support_id = request.data.get("support_id")
+
         if not support_id:
             return Response(
                 {"support_id": ["This feild is required."]},
@@ -239,6 +238,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
@@ -295,6 +295,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
@@ -303,8 +304,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated, IsSupport],
     )
     def resume(self, request, pk=None):
-        # US15 KB4: the assigned IT Support continues a REOPEN ticket
-        # (REOPEN -> PROCESSING) when they choose to.
         ticket = self.get_object()
 
         try:
@@ -313,6 +312,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
@@ -323,6 +323,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         ticket = self.get_object()
         reason = (request.data.get("reason") or "").strip()
+
         if not reason:
             return Response(
                 {"reason": ["A reason for refusal is required."]},
@@ -335,6 +336,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             raise to_api_exception(ex)
 
         serializer = self.get_serializer(ticket)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(
@@ -395,6 +397,23 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="export-excel",
+        permission_classes=[IsSupportOrManager],
+    )
+    def export_excel(self, request):
+        task = export_tickets_excel_task.delay(user_id=str(request.user.pk))
+
+        return Response(
+            {
+                "detail": "Yêu cầu xuất báo cáo Excel đã được tiếp nhận và đang xử lý ngầm.",
+                "task_id": task.id,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class CommentViewSet(viewsets.ModelViewSet):
     serializer_class = CommentSerializer
@@ -407,8 +426,6 @@ class CommentViewSet(viewsets.ModelViewSet):
             "attachments"
         )
 
-        # Same visibility rule as TicketViewSet: a Requester only sees
-        # comments of tickets they created.
         user = self.request.user
         if user.role == User.Role.REQUESTER:
             qs = qs.filter(ticket__created_by=user)

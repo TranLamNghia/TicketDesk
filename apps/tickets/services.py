@@ -1,3 +1,7 @@
+from pathlib import Path
+from django.conf import settings
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
@@ -520,3 +524,67 @@ def create_comment(ticket: Ticket, author: User, content: str, attachment=None):
     )
 
     return comment
+
+
+def export_tickets_to_excel(tickets_queryset, output_filename: str = None) -> str:
+    export_dir = Path(settings.MEDIA_ROOT)
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    if not output_filename:
+        from django.utils import timezone
+
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"ticket_export_{timestamp}.xlsx"
+
+    file_path = export_dir / output_filename
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ticket Report"
+
+    headers = [
+        "Mã ticket",
+        "Tiêu đề",
+        "Danh mục",
+        "Độ ưu tiên",
+        "Trạng thái",
+        "Người tạo",
+        "Người xử lý",
+        "Ngày tạo",
+    ]
+    ws.append(headers)
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(
+        start_color="1F4E79", end_color="1F4E79", fill_type="solid"
+    )
+
+    for col_num in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for ticket in tickets_queryset:
+        current_status = get_current_status(ticket)
+        ws.append(
+            [
+                str(ticket.pk),
+                ticket.title,
+                ticket.category.name if ticket.category else "",
+                ticket.priority,
+                current_status,
+                ticket.created_by.username if ticket.created_by else "",
+                ticket.assignee.username if ticket.assignee else "Chưa ai nhận",
+                ticket.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            ]
+        )
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    wb.save(file_path)
+
+    return str(file_path)
